@@ -2,30 +2,28 @@
 chcp 65001 >nul 2>nul
 
 set "IMAGE=target\x86_64-blog_os\debug\bootimage-blog_os.bin"
+set "QEMU=C:\Program Files\qemu\qemu-system-x86_64.exe"
 
-echo [*] Сборка blog_os...
+echo [*] NeroShizaDev OS v0.2 - Sborka...
 cargo bootimage
 if not exist "%IMAGE%" (
-    echo [!] Ошибка сборки! Образ не создан.
+    echo [!] Oshibka sborki! Obraz ne sozdan.
     pause
     exit /b 1
 )
 
-where qemu-system-x86_64 >nul 2>nul
-if %errorlevel% neq 0 (
-    if exist "C:\Program Files\qemu\qemu-system-x86_64.exe" (
-        set "QEMU=C:\Program Files\qemu\qemu-system-x86_64.exe"
-    ) else (
-        echo [!] QEMU не найден!
-        echo     Скачай: https://www.qemu.org/download/#windows
-        echo     Установи в C:\Program Files\qemu и добавь в PATH
-        pause
-        exit /b 1
-    )
-) else (
-    set "QEMU=qemu-system-x86_64"
+if not exist "%QEMU%" (
+    echo [!] QEMU ne najden: %QEMU%
+    echo     https://www.qemu.org/download/#windows
+    pause
+    exit /b 1
 )
 
-echo [*] Запуск в QEMU...
-"%QEMU%" -cpu max -drive format=raw,file=%IMAGE% -no-reboot -no-shutdown
+echo [*] Zapusk v QEMU (PC Speaker ON)...
+echo     Komandy: gubka, zvuk, vremya, pomosh
+echo     Esc=sbros, CapsLock=enter, ScrollLock=RUS/ENG
+echo.
+
+"%QEMU%" -cpu max -drive format=raw,file=%IMAGE% -no-reboot -no-shutdown -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0
+
 pause

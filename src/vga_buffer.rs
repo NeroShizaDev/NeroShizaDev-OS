@@ -37,7 +37,7 @@ struct Buffer {
 }
 
 pub struct Writer {
-    column_position: usize,
+    pub column_position: usize,
     pub color_code: ColorCode,
     buffer: &'static mut Buffer,
 }
@@ -46,6 +46,19 @@ impl Writer {
     pub fn write_byte(&mut self, byte: u8) {
         match byte {
             b'\n' => self.new_line(),
+            0x08 => {
+                // Backspace: сдвигаем курсор назад и стираем
+                if self.column_position > 0 {
+                    self.column_position -= 1;
+                    let row = BUFFER_HEIGHT - 1;
+                    let col = self.column_position;
+                    let color_code = self.color_code;
+                    self.buffer.chars[row][col].write(ScreenChar {
+                        ascii_character: b' ',
+                        color_code,
+                    });
+                }
+            }
             byte => {
                 if self.column_position >= BUFFER_WIDTH {
                     self.new_line();
@@ -63,6 +76,21 @@ impl Writer {
     }
 
     fn new_line(&mut self) {
+        // Сохраняем строку 0 в scrollback перед уничтожением
+        unsafe {
+            let sw = SCROLL_WRITE;
+            let sb = &raw mut SCROLLBACK as *mut u8;
+            let base = sw * BUFFER_WIDTH * 2;
+            for col in 0..BUFFER_WIDTH {
+                let sc = self.buffer.chars[0][col].read();
+                *sb.add(base + col * 2) = sc.ascii_character;
+                *sb.add(base + col * 2 + 1) = sc.color_code.0;
+            }
+            SCROLL_WRITE = (sw + 1) % SCROLLBACK_LINES;
+            if SCROLL_TOTAL < SCROLLBACK_LINES {
+                SCROLL_TOTAL += 1;
+            }
+        }
         for row in 1..BUFFER_HEIGHT {
             for col in 0..BUFFER_WIDTH {
                 let character = self.buffer.chars[row][col].read();
@@ -138,4 +166,75 @@ pub fn _print(args: fmt::Arguments) {
 
 pub fn clear_screen() {
     WRITER.lock().clear_screen();
+}
+
+// ============================================================
+// SCROLLBACK — кольцевой буфер 100 строк
+// ============================================================
+const SCROLLBACK_LINES: usize = 100;
+static mut SCROLLBACK: [u8; SCROLLBACK_LINES * BUFFER_WIDTH * 2] = [0; SCROLLBACK_LINES * BUFFER_WIDTH * 2];
+static mut SCROLL_WRITE: usize = 0;
+static mut SCROLL_TOTAL: usize = 0;
+static mut SAVED_SCREEN: [u8; BUFFER_HEIGHT * BUFFER_WIDTH * 2] = [0; BUFFER_HEIGHT * BUFFER_WIDTH * 2];
+
+pub fn scroll_total() -> usize {
+    unsafe { SCROLL_TOTAL }
+}
+
+pub fn save_screen() {
+    unsafe {
+        let vga = 0xB8000 as *const u8;
+        let ptr = &raw mut SAVED_SCREEN as *mut u8;
+        for i in 0..(BUFFER_HEIGHT * BUFFER_WIDTH * 2) {
+            *ptr.add(i) = *vga.add(i);
+        }
+    }
+}
+
+pub fn restore_screen() {
+    unsafe {
+        let vga = 0xB8000 as *mut u8;
+        let ptr = &raw const SAVED_SCREEN as *const u8;
+        for i in 0..(BUFFER_HEIGHT * BUFFER_WIDTH * 2) {
+            *vga.add(i) = *ptr.add(i);
+        }
+    }
+}
+
+pub fn show_scrollback(scroll_offset: usize) {
+    unsafe {
+        let vga = 0xB8000 as *mut u8;
+        let total = SCROLL_TOTAL;
+        let write_pos = SCROLL_WRITE;
+        let sb = &raw const SCROLLBACK as *const u8;
+
+        // Строки 0-23: контент из scrollback
+        for row in 0..(BUFFER_HEIGHT - 1) {
+            let lines_back = scroll_offset + (BUFFER_HEIGHT - 2 - row);
+            let row_base = row * BUFFER_WIDTH * 2;
+            if lines_back < total {
+                let idx = (write_pos + SCROLLBACK_LINES - 1 - lines_back) % SCROLLBACK_LINES;
+                let sb_base = idx * BUFFER_WIDTH * 2;
+                for col in 0..BUFFER_WIDTH {
+                    *vga.add(row_base + col * 2) = *sb.add(sb_base + col * 2);
+                    *vga.add(row_base + col * 2 + 1) = *sb.add(sb_base + col * 2 + 1);
+                }
+            } else {
+                for col in 0..BUFFER_WIDTH {
+                    *vga.add(row_base + col * 2) = b' ';
+                    *vga.add(row_base + col * 2 + 1) = 0x07;
+                }
+            }
+        }
+        // Строка 24: статус-бар
+        let row_base = (BUFFER_HEIGHT - 1) * BUFFER_WIDTH * 2;
+        for col in 0..BUFFER_WIDTH {
+            *vga.add(row_base + col * 2) = b' ';
+            *vga.add(row_base + col * 2 + 1) = 0x70; // Black on LightGray
+        }
+        let msg = b" PgUp/PgDn  Esc=back";
+        for (i, &ch) in msg.iter().enumerate() {
+            *vga.add(row_base + i * 2) = ch;
+        }
+    }
 }

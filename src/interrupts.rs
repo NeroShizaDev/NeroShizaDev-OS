@@ -86,11 +86,54 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     let mut port = Port::new(0x60);
 
     let scancode: u8 = unsafe { port.read() };
+
+    // Alt (Left Alt = 0x38): треким состояние для Alt+Fn хоткеев
+    if scancode == 0x38 {
+        unsafe { crate::ALT_HELD = true; }
+    }
+    if scancode == 0xB8 {
+        unsafe { crate::ALT_HELD = false; }
+    }
+
+    // Ctrl (Left Ctrl = 0x1D): треким для Ctrl+C/V/X/A
+    if scancode == 0x1D {
+        unsafe { crate::CTRL_HELD = true; }
+    }
+    if scancode == 0x9D {
+        unsafe { crate::CTRL_HELD = false; }
+    }
+
+    // Shift (Left = 0x2A, Right = 0x36): треким для Shift+стрелки
+    if scancode == 0x2A || scancode == 0x36 {
+        unsafe { crate::SHIFT_HELD = true; }
+    }
+    if scancode == 0xAA || scancode == 0xB6 {
+        unsafe { crate::SHIFT_HELD = false; }
+    }
+
+    // CapsLock (0x3A) — перехватываем ДО pc-keyboard, чтобы не менял регистр
+    // Только нажатие (без бита 0x80), отпускание игнорируем
+    if scancode == 0x3A {
+        crate::handle_raw_key(pc_keyboard::KeyCode::CapsLock);
+        unsafe {
+            PICS.lock()
+                .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+        }
+        return;
+    }
+    if scancode == 0xBA { // 0x3A | 0x80 = отпускание CapsLock
+        unsafe {
+            PICS.lock()
+                .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+        }
+        return;
+    }
+
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
         if let Some(key) = keyboard.process_keyevent(key_event) {
             match key {
                 DecodedKey::Unicode(character) => crate::handle_keyboard_input(character),
-                DecodedKey::RawKey(_) => {}
+                DecodedKey::RawKey(key) => crate::handle_raw_key(key),
             }
         }
     }
