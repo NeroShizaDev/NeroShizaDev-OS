@@ -1,4 +1,19 @@
 /target
+tools/image_builder/target/
 **/*.rs.bk
 
 .vscode
+.idea/
+
+# История чатов AI-ассистентов
+ai_chat_history.txt
+
+# Локальные артефакты Windows / отладка (корень проекта не превращать в свалку)
+*.exe
+*.pdb
+*.ilk
+*.log
+*.bak
+
+# Локальные настройки инструментов (не коммитить)
+.claude/

@@ -10,7 +10,13 @@ use x86_64::instructions::port::Port;
 
 /// Включает бипер на заданной частоте (Гц).
 /// Если freq == 0, выключает звук.
+/// Сначала probe_speaker() — если порт не отвечает (0xFF), молча выходим.
 pub unsafe fn play(freq: u32) {
+    // Правило: опрос порта ПЕРЕД записью.
+    // probe_speaker() читает 0x61: 0xFF = устройства нет (USB-only PC).
+    if !crate::validator::probe_speaker() {
+        return;
+    }
     unsafe {
         let mut port_61 = Port::<u8>::new(0x61);
         let mut port_43 = Port::<u8>::new(0x43);
@@ -91,7 +97,10 @@ pub unsafe fn play_hex_note(note: u8, octave_shift: i8) {
 /// Демо: играем восходящую 16-нотную гамму.
 /// Каждая нота звучит ~80мс (примерная задержка через busy loop).
 pub fn demo_hex_scale() {
-    crate::println!("--- 16-нотная гексатоника (PC Speaker) ---");
+    crate::locale::print_localized_line(
+        crate::user_messages::current(crate::user_messages::UiText::BeeperStart),
+        0x0E,
+    );
     for i in 0..16u8 {
         crate::print!("0x{:X} ", i);
         unsafe { play_hex_note(i, 0) };
@@ -101,6 +110,9 @@ pub fn demo_hex_scale() {
         }
     }
     unsafe { stop() };
-    crate::println!("");
-    crate::println!("--- Бипер OK ---");
+    crate::locale::print_localized_line("", 0x0E);
+    crate::locale::print_localized_line(
+        crate::user_messages::current(crate::user_messages::UiText::BeeperDone),
+        0x0A,
+    );
 }

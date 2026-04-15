@@ -7,7 +7,6 @@
 // ============================================================
 
 use core::arch::asm;
-use x86_64::instructions::port::Port;
 
 const W: usize = 80;
 const H: usize = 25;
@@ -87,6 +86,10 @@ fn isqrt(val: i64) -> i64 {
 
 fn fpu_sin(a: i64) -> i64 {
     let r: i64;
+    // SAFETY: x87 FPU FSIN — доступен в long mode (CPUID).
+    // push/pop через rsp явный: fild читает из [rsp], fistp пишет в [rsp].
+    // x87-стек: push push fdivp (2→1) fsin (1→1) push fmulp (2→1) fistp (1→0) — баланс 0.
+    // add rsp,16/8 вручную корректируют RSP после наших push.
     unsafe {
         asm!(
             "push {a}", "fild qword ptr [rsp]",
@@ -102,6 +105,7 @@ fn fpu_sin(a: i64) -> i64 {
 
 fn fpu_cos(a: i64) -> i64 {
     let r: i64;
+    // SAFETY: аналогично fpu_sin — x87 FCOS; баланс стека идентичен.
     unsafe {
         asm!(
             "push {a}", "fild qword ptr [rsp]",
@@ -224,6 +228,9 @@ fn render(angle: i64) {
             };
 
             let off = (row * W + col) * 2;
+            // SAFETY: off = (row*W + col)*2, row<H=25, col<W=80 → off < 25*80*2 = 4000.
+            // vga = 0xB8000 identity-mapped; прямая запись без volatile допустима
+            // здесь т.к. WRITER.lock() не используется (menger-loop без блокировок).
             unsafe {
                 *vga.add(off) = ch;
                 *vga.add(off + 1) = attr;
@@ -239,12 +246,11 @@ fn render(angle: i64) {
 pub fn run_demo() {
     crate::vga_buffer::clear_screen();
 
-    let mut last_sc: u8 = unsafe {
-        let mut p: Port<u8> = Port::new(0x60);
-        p.read()
-    };
+    // SAFETY: ps2::read_scancode — порт 0x60, сдвигает FIFO контроллера.
+    // Bare-metal ядро: единственный потребитель, нет конкурентных читателей.
+    let mut last_sc: u8 = unsafe { crate::ps2::read_scancode() };
     for _ in 0..50000u32 {
-        let sc: u8 = unsafe { let mut p: Port<u8> = Port::new(0x60); p.read() };
+        let sc: u8 = unsafe { crate::ps2::read_scancode() };
         if sc & 0x80 != 0 { last_sc = sc; break; }
         last_sc = sc;
     }
@@ -257,18 +263,20 @@ pub fn run_demo() {
         angle += 30; // ~1.7° за кадр
         if angle > 6434 { angle -= 6434; }
 
-        let sc: u8 = unsafe { let mut p: Port<u8> = Port::new(0x60); p.read() };
+        // SAFETY: ps2::read_scancode — порт 0x60, проверяем скан-код для выхода.
+        let sc: u8 = unsafe { crate::ps2::read_scancode() };
         if sc != last_sc && sc & 0x80 == 0 { break; }
         last_sc = sc;
 
-        unsafe {
-            let mut p: Port<u8> = Port::new(0x3DA);
-            while p.read() & 0x08 != 0 {}
-            while p.read() & 0x08 == 0 {}
-        }
+        // SAFETY: ps2::wait_vblank — порт 0x3DA, ожидаем vblank без разрывов.
+        // Чтение сбрасывает AC flip-flop как побочный эффект (ожидаемо).
+        unsafe { crate::ps2::wait_vblank(); }
     }
 
     crate::vga_buffer::clear_screen();
-    crate::println!("NeroShiza: Губка Менгера завершена.");
+    crate::locale::print_localized_line(
+        crate::user_messages::current(crate::user_messages::UiText::MengerDone),
+        0x0B,
+    );
     crate::print!("> ");
 }

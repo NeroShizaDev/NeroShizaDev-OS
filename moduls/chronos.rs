@@ -7,7 +7,6 @@
 // 4. Тригочасы — время как угол на тригонометрическом круге
 // ============================================================
 
-use x86_64::instructions::port::Port;
 use core::arch::asm;
 
 // ============================================================
@@ -79,16 +78,28 @@ pub fn to_psychotown(year: u16, month: u8, day: u8) -> PsychotownDate {
 // ============================================================
 
 unsafe fn cmos_read_raw(reg: u8) -> u8 {
-    unsafe {
-        let mut index: Port<u8> = Port::new(0x70);
-        let mut data: Port<u8> = Port::new(0x71);
-        index.write(reg);
-        data.read()
-    }
+    // Используем функцию без задержки для циклов ожидания
+    unsafe { crate::validator::cmos_read_no_delay(reg) }
 }
 
-/// Выводит время в шестнадцатеричном формате (сырые регистры CMOS)
+/// Выводит время в шестнадцатеричном формате (сырые регистры CMOS).
+/// Правило: probe_cmos() перед любым чтением CMOS-порта.
 pub fn display_hex_time() {
+    // Сначала опрос: жив ли чип и батарейка?
+    let report = crate::validator::probe_cmos();
+    if !report.chip_alive {
+        crate::locale::print_localized_line(
+            crate::user_messages::current(crate::user_messages::UiText::ChronosHexNoChip),
+            0x0C,
+        );
+        return;
+    }
+    if !report.battery_ok {
+        crate::locale::print_localized_line(
+            crate::user_messages::current(crate::user_messages::UiText::ChronosHexDeadBattery),
+            0x0C,
+        );
+    }
     unsafe {
         // Ждём стабильного чтения
         while cmos_read_raw(0x0A) & 0x80 != 0 {}
@@ -100,8 +111,10 @@ pub fn display_hex_time() {
         let month = cmos_read_raw(0x08);
         let year = cmos_read_raw(0x09);
 
-        crate::println!("  0x{:02X}:0x{:02X}:0x{:02X}  0x{:02X}.0x{:02X}.0x20{:02X}",
-            hour, min, sec, day, month, year);
+        crate::locale::print_localized_fmt(
+            0x0E,
+            format_args!("  0x{:02X}:0x{:02X}:0x{:02X}  0x{:02X}.0x{:02X}.0x20{:02X}", hour, min, sec, day, month, year),
+        );
     }
 }
 
@@ -245,15 +258,15 @@ pub fn display_trig_clock() {
     let deg_whole = alpha_norm / 100;
     let deg_frac = alpha_norm % 100;
 
-    crate::println!("  Угол: {}.{:02}*", deg_whole, deg_frac);
+    crate::user_messages::print_chronos_angle(deg_whole, deg_frac);
     let sin_sign = if sin_val < 0 { "-" } else { "" };
     let sin_abs = if sin_val < 0 { -sin_val } else { sin_val };
-    crate::println!("  sin = {}{}.{:02}  [{}]", sin_sign, sin_abs / 10000, (sin_abs % 10000) / 100, sin_radical);
+    crate::locale::print_localized_fmt(0x0E, format_args!("  sin = {}{}.{:02}  [{}]", sin_sign, sin_abs / 10000, (sin_abs % 10000) / 100, sin_radical));
 
     let cos_sign = if cos_val < 0 { "-" } else { "" };
     let cos_abs = if cos_val < 0 { -cos_val } else { cos_val };
-    crate::println!("  cos = {}{}.{:02}  [{}]", cos_sign, cos_abs / 10000, (cos_abs % 10000) / 100, cos_radical);
-    crate::println!("  Корни: sin~{}, cos~{}", sin_radical, cos_radical);
+    crate::locale::print_localized_fmt(0x0E, format_args!("  cos = {}{}.{:02}  [{}]", cos_sign, cos_abs / 10000, (cos_abs % 10000) / 100, cos_radical));
+    crate::user_messages::print_chronos_roots(sin_radical, cos_radical);
 }
 
 // ============================================================
@@ -261,32 +274,71 @@ pub fn display_trig_clock() {
 // ============================================================
 
 /// Выводит время в трёх реальностях + тригочасы.
+/// Правило: probe_cmos() перед чтением RTC.
 pub fn display_triple_time() {
+    let report = crate::validator::probe_cmos();
+    if !report.chip_alive {
+        crate::locale::print_localized_line(
+            crate::user_messages::current(crate::user_messages::UiText::ChronosTimeNoChip),
+            0x0C,
+        );
+        return;
+    }
+    if !report.battery_ok {
+        crate::locale::print_localized_line(
+            crate::user_messages::current(crate::user_messages::UiText::ChronosTimeDeadBattery),
+            0x0C,
+        );
+    }
     let dt = crate::rtc::read_moscow_time();
 
     // === Заголовок ===
-    crate::println!("=== ВРЕМЯ В ЧЕТЫРЁХ РЕАЛЬНОСТЯХ ===");
+    crate::locale::print_localized_line(
+        crate::user_messages::current(crate::user_messages::UiText::ChronosHeader),
+        0x0E,
+    );
 
     // 1. Человеческое
-    crate::println!("[Человеческое]");
-    crate::println!("  {:02}:{:02}:{:02}  {:02}.{:02}.{}",
-        dt.hours, dt.minutes, dt.seconds,
-        dt.day, dt.month, dt.year);
+    crate::locale::print_localized_line(
+        crate::user_messages::current(crate::user_messages::UiText::ChronosHuman),
+        0x0B,
+    );
+    crate::locale::print_localized_fmt(
+        0x0E,
+        format_args!("  {:02}:{:02}:{:02}  {:02}.{:02}.{}", dt.hours, dt.minutes, dt.seconds, dt.day, dt.month, dt.year),
+    );
 
     // 2. Шестнадцатеричное (сырые регистры CMOS)
-    crate::println!("[Шестнадцатеричное]");
+    crate::locale::print_localized_line(
+        crate::user_messages::current(crate::user_messages::UiText::ChronosHex),
+        0x0B,
+    );
     display_hex_time();
 
     // 3. Психотаунское (Мир 100)
     let p = to_psychotown(dt.year, dt.month, dt.day);
-    crate::println!("[Психотаунское - Мир 100]");
-    crate::println!("  {:02}.{:02}.{:04}  ({} дней от эпохи 2000)",
-        p.day, p.month, p.year, p.total_days);
-    crate::println!("  100 дней в месяце, 1200 дней в году");
+    crate::locale::print_localized_line(
+        crate::user_messages::current(crate::user_messages::UiText::ChronosPsychotown),
+        0x0B,
+    );
+    crate::locale::print_localized_fmt(
+        0x0E,
+        format_args!("  {:02}.{:02}.{:04}  ({} days since 2000 epoch)", p.day, p.month, p.year, p.total_days),
+    );
+    crate::locale::print_localized_line(
+        crate::user_messages::current(crate::user_messages::UiText::ChronosPsychotownHint),
+        0x0E,
+    );
 
     // 4. Тригонометрические часы
-    crate::println!("[Тригочасы Архитектора Хаоса]");
+    crate::locale::print_localized_line(
+        crate::user_messages::current(crate::user_messages::UiText::ChronosTrigClock),
+        0x0B,
+    );
     display_trig_clock();
 
-    crate::println!("--- Если ты это читаешь, всё в порядке ---");
+    crate::locale::print_localized_line(
+        crate::user_messages::current(crate::user_messages::UiText::ChronosFooter),
+        0x0A,
+    );
 }

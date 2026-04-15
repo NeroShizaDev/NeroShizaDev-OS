@@ -143,15 +143,18 @@ pub fn shannon_entropy(data: &[u8]) -> u64 {
 
 /// Демо: вычисляет и выводит результаты FPU
 pub fn demo() {
-    crate::println!("--- x87 FPU Demo ---");
+    crate::locale::print_localized_line(
+        crate::user_messages::current(crate::user_messages::UiText::FpuHeader),
+        0x0E,
+    );
 
     // sqrt тесты
-    crate::println!("sqrt(144) = {}", sqrt(144));
-    crate::println!("sqrt(1000000) = {}", sqrt(1000000));
+    crate::user_messages::print_fpu_sqrt(144, sqrt(144));
+    crate::user_messages::print_fpu_sqrt(1_000_000, sqrt(1_000_000));
 
     // log2 тесты  
-    crate::println!("log2(256) = {}", log2(256));
-    crate::println!("log2(1024) = {}", log2(1024));
+    crate::user_messages::print_fpu_log(256, log2(256));
+    crate::user_messages::print_fpu_log(1024, log2(1024));
 
     // Энтропия тестовых данных
     let low_entropy = b"AAAAAAAAAAAAAAAA";  // повторяющиеся — низкая энтропия
@@ -160,7 +163,10 @@ pub fn demo() {
     let h_low = shannon_entropy(low_entropy);
     let h_high = shannon_entropy(high_entropy);
 
-    crate::println!("Энтропия 'AAAA...' = {}.{}", h_low / 1000, h_low % 1000);
-    crate::println!("Энтропия 'abcd...' = {}.{}", h_high / 1000, h_high % 1000);
-    crate::println!("--- FPU OK ---");
+    crate::user_messages::print_fpu_entropy("AAAA...", h_low / 1000, h_low % 1000);
+    crate::user_messages::print_fpu_entropy("abcd...", h_high / 1000, h_high % 1000);
+    crate::locale::print_localized_line(
+        crate::user_messages::current(crate::user_messages::UiText::FpuDone),
+        0x0A,
+    );
 }

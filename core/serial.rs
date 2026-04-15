@@ -1,12 +1,16 @@
 use lazy_static::lazy_static;
 use spin::Mutex;
-use uart_16550::SerialPort;
+use uart_16550::{Uart16550Tty, backend::PioBackend, Config};
 
 lazy_static! {
-    pub static ref SERIAL1: Mutex<SerialPort> = {
-        let mut serial_port = unsafe { SerialPort::new(0x3F8) };
-        serial_port.init();
-        Mutex::new(serial_port)
+    pub static ref SERIAL1: Mutex<Uart16550Tty<PioBackend>> = {
+        // SAFETY: 0x3F8 — стандартный базовый адрес COM1.
+        // Вызывается единственный раз при первом обращении к SERIAL1.
+        let serial = unsafe {
+            Uart16550Tty::new_port(0x3F8, Config::default())
+                .expect("serial: не могу инициализировать COM1")
+        };
+        Mutex::new(serial)
     };
 }
 
@@ -23,7 +27,7 @@ pub fn _print(args: ::core::fmt::Arguments) {
     });
 }
 
-/// Prints to the host through the serial interface.
+/// Выводит в хост через serial (без переноса строки).
 #[macro_export]
 macro_rules! serial_print {
     ($($arg:tt)*) => {
@@ -31,7 +35,7 @@ macro_rules! serial_print {
     };
 }
 
-/// Prints to the host through the serial interface, appending a newline.
+/// Выводит в хост через serial (с переносом строки).
 #[macro_export]
 macro_rules! serial_println {
     () => ($crate::serial_print!("\n"));
