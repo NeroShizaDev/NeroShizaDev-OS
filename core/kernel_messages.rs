@@ -1,15 +1,15 @@
 // ============================================================
-// KERNEL MESSAGES — NeroShiza Multilingual Event System
+// KERNEL MESSAGES — NeroShizaDev Multilingual Event System
 // KernelEvent × Locale × MessageMode → &'static str
 // ============================================================
-// Architecture:
-//   Ядро хранит СМЫСЛ (KernelEvent), а не текст.
-//   Рендер-пайплайн выбирает нужную (Locale × MessageMode)
-//   и выводит через locale::render_event().
+// Архитектура:
+//   Ядро хранит смысл (KernelEvent), а не готовый текст.
+//   Рендер-пайплайн выбирает нужную пару (Locale × MessageMode)
+//   и выводит результат через locale::render_event().
 //
 //   Слои:
-//     Technical — сухой инженерный
-//     Lore      — фирменный стиль NeroShiza / И.Б.И.П.
+//     Technical — сухой инженерный режим.
+//     Lore      — фирменный стиль NeroShizaDev / И.Б.И.П.
 // ============================================================
 
 /// Системные события ядра, требующие вывода сообщения
@@ -18,6 +18,7 @@ pub enum KernelEvent {
     Panic,
     Watchdog,
     PageFault,
+    GeneralProtection,
     DoubleFault,
     OutOfMemory,
     InvalidOpcode,
@@ -49,7 +50,7 @@ pub enum Locale {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageMode {
     Technical, // Инженерный — сухо и точно
-    Lore,      // Лор — фирменный NeroShiza стиль
+    Lore,      // Лор — фирменный NeroShizaDev стиль
 }
 
 /// Пара текстов для одного события (technical + lore)
@@ -105,6 +106,21 @@ pub fn get_event_text(locale: Locale, ev: KernelEvent) -> EventText {
         (Locale::ArEg, KernelEvent::PageFault) => EventText {
             technical: "خطأ في تحديد الصفحة.",
             lore:      "الوعي لمس صفحة غير موجودة.",
+        },
+
+        // ==================== GENERAL PROTECTION ====================
+
+        (Locale::RuRu, KernelEvent::GeneralProtection) => EventText {
+            technical: "ОБЩАЯ ОШИБКА ЗАЩИТЫ ПРОЦЕССОРА.",
+            lore:      "ГРАНИЦА РЕЖИМА БЫЛА НАРУШЕНА. МЕХАНИЗМ ЗАЩИТЫ ОСТАНОВИЛ ПЕРЕХОД.",
+        },
+        (Locale::EnUs, KernelEvent::GeneralProtection) => EventText {
+            technical: "GENERAL PROTECTION FAULT.",
+            lore:      "A PROTECTED BOUNDARY WAS CROSSED. THE CPU REFUSED THE TRANSITION.",
+        },
+        (Locale::ArEg, KernelEvent::GeneralProtection) => EventText {
+            technical: "خطأ حماية عام.",
+            lore:      "تم تجاوز حد محمي. المعالج رفض الانتقال.",
         },
 
         // ==================== DOUBLE FAULT ====================
@@ -277,15 +293,15 @@ pub fn get_event_text(locale: Locale, ev: KernelEvent) -> EventText {
 
         (Locale::RuRu, KernelEvent::ShellModeLore) => EventText {
             technical: "РЕЖИМ ВЫВОДА: LORE.",
-            lore:      "ФИРМЕННЫЙ ТОН АКТИВИРОВАН. ЯДРО ГОВОРИТ ГОЛОСОМ NEROSHIZA.",
+            lore:      "ФИРМЕННЫЙ ТОН АКТИВИРОВАН. ЯДРО ГОВОРИТ ГОЛОСОМ NEROSHIZADEV.",
         },
         (Locale::EnUs, KernelEvent::ShellModeLore) => EventText {
             technical: "OUTPUT MODE: LORE.",
-            lore:      "SIGNATURE VOICE ENABLED. THE KERNEL SPEAKS IN NEROSHIZA TONE.",
+            lore:      "SIGNATURE VOICE ENABLED. THE KERNEL SPEAKS IN NEROSHIZADEV TONE.",
         },
         (Locale::ArEg, KernelEvent::ShellModeLore) => EventText {
             technical: "وضع الإخراج: LORE.",
-            lore:      "تم تفعيل النبرة الخاصة. النواة تتكلم بصوت NeroShiza.",
+            lore:      "تم تفعيل النبرة الخاصة. النواة تتكلم بصوت NeroShizaDev.",
         },
 
         (Locale::RuRu, KernelEvent::ShellModeTech) => EventText {
@@ -335,6 +351,7 @@ pub fn event_short_name(ev: KernelEvent) -> &'static str {
         KernelEvent::Panic           => "PANIC",
         KernelEvent::Watchdog        => "WDT",
         KernelEvent::PageFault       => "PF",
+        KernelEvent::GeneralProtection => "GP",
         KernelEvent::DoubleFault     => "DF",
         KernelEvent::OutOfMemory     => "OOM",
         KernelEvent::InvalidOpcode   => "UD",

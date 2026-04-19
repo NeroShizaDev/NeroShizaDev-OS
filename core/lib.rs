@@ -1,11 +1,30 @@
 #![no_std]
-#![cfg_attr(test, no_main)]
+#![cfg_attr(all(test, target_os = "none"), no_main)]
 #![feature(abi_x86_interrupt)]
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test_runner)]
-#![reexport_test_harness_main = "test_main"]
+#![cfg_attr(all(test, target_os = "none"), reexport_test_harness_main = "test_main")]
+
+// ================================================================
+// ГЛОБАЛЬНЫЕ АТРИБУТЫ ЛИНТОВ — только реальные ошибки, без шума
+// ================================================================
 #![allow(unsafe_op_in_unsafe_fn)]
 #![allow(dead_code)]
+// Стиль: в no_std ядре имена, касты и паттерны нестандартны намеренно
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(unused_variables)]
+#![allow(unused_mut)]
+#![allow(unused_imports)]
+#![allow(unused_labels)]
+#![allow(unreachable_code)]
+#![allow(unreachable_patterns)]
+#![allow(redundant_semicolons)]
+// Clippy: подавляем косметику, оставляем correctness
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::needless_return)]
+#![allow(clippy::redundant_field_names)]
 
 extern crate alloc;
 
@@ -18,26 +37,24 @@ extern crate alloc;
 #[path = "../vga/mod.rs"]
 pub mod vga;
 
-#[path = "../demo/mod.rs"]
-pub mod demo;
-
 #[path = "../fonts/mod.rs"]
 pub mod fonts;
 
-#[path = "../moduls/mod.rs"]
-pub mod moduls;
-
-/// crate::shell = shell/shell.rs (глобальное состояние шелла, ISR-хуки)
-#[path = "../shell/shell.rs"]
+/// crate::shell = apps/shell/shell.rs (глобальное состояние шелла, ISR-хуки)
+#[path = "../apps/shell/shell.rs"]
 pub mod shell;
 
-/// crate::logo = shell/logo.rs (загрузочный логотип)
-#[path = "../shell/logo.rs"]
+/// crate::logo = apps/shell/logo.rs (загрузочный логотип)
+#[path = "../apps/shell/logo.rs"]
 pub mod logo;
 
 /// crate::doom = doom/mod.rs (Doom-подсистема)
-#[path = "../doom/mod.rs"]
+#[path = "../apps/doom/mod.rs"]
 pub mod doom;
+
+/// crate::apps = apps/mod.rs (лаунчер программ: Doom/Games/Jackal)
+#[path = "../apps/mod.rs"]
+pub mod apps;
 
 // ================================================================
 // ФАЗА 1: Ранняя инициализация & Линия жизни
@@ -55,7 +72,7 @@ pub use vga::vga_buffer;
 // ================================================================
 pub mod gdt;
 pub mod interrupts;
-pub use demo::fpu;
+pub use apps::fpu;
 
 // ================================================================
 // ФАЗА 3: Память
@@ -71,9 +88,11 @@ pub mod memory;
 // ================================================================
 pub mod validator;
 pub mod trace;
-pub use moduls::rtc;
-pub use moduls::chronos;
-pub use moduls::rng;
+pub mod irq_guard;
+pub mod port_firewall;
+pub use apps::rtc;
+pub use apps::chronos;
+pub use apps::rng;
 
 // ================================================================
 // ФАЗА 5: Железо и Ввод
@@ -81,7 +100,7 @@ pub use moduls::rng;
 // ps2: клавиатура/мышь. beeper: OK-сигнал после инициализации.
 // ================================================================
 pub mod ps2;
-pub use demo::beeper;
+pub use apps::beeper;
 
 // ================================================================
 // ФАЗА 6: Мультиязычность и Рендеринг текста
@@ -94,7 +113,6 @@ pub use fonts::unicode_categories;
 pub use fonts::unicode_scripts;
 pub use vga::vga_unicode;
 pub use fonts::locale;
-#[path = "../src/kernel_messages.rs"]
 pub mod kernel_messages;
 pub mod user_messages;
 
@@ -103,9 +121,11 @@ pub mod user_messages;
 // shell, logo, doom — объявлены выше с #[path].
 // menger, voodoo_math — из moduls/.
 // ================================================================
-pub use moduls::menger;
-pub use moduls::voodoo_math;
-pub use crate::voodoo_math::demo_cellular_automaton;
+pub use apps::menger;
+pub mod voodoo_engine;
+pub use crate::voodoo_engine::demo_cellular_automaton;
+// Compatibility alias: call sites using crate::voodoo_math still work
+pub use crate::voodoo_engine as voodoo_math;
 
 use core::panic::PanicInfo;
 
@@ -141,13 +161,23 @@ pub fn init() {
 }
 
 pub fn hlt_loop() -> ! {
-    loop { x86_64::instructions::hlt(); }
+    loop {
+        x86_64::instructions::hlt();
+        shell::process_deferred_actions();
+    }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "none"))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     test_panic_handler(info)
+}
+
+#[cfg(all(test, target_os = "none"))]
+mod test_harness {
+    unsafe extern "Rust" {
+        pub fn test_main();
+    }
 }
 
 pub trait Testable { fn run(&self); }
@@ -182,10 +212,10 @@ pub fn test_runner(tests: &[&dyn Testable]) {
     exit_qemu(QemuExitCode::Success);
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "none"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
     init();
-    test_main();
+    unsafe { test_harness::test_main(); }
     hlt_loop();
 }

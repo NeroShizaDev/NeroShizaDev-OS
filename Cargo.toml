@@ -1,10 +1,11 @@
 [package]
-name = "blog_os"
-version = "0.1.0"
+name = "NeroShizaDev-OS"
+version = "0.3.0"
 authors = ["NeroShizaDev"]
 edition = "2024"
 
 [lib]
+name = "blog_os"
 path = "core/lib.rs"
 
 [[bin]]
@@ -26,7 +27,6 @@ pc-keyboard = "0.8.0"
 pic8259 = "0.11.0"
 spin = "0.10.0"
 uart_16550 = "0.6.0"
-volatile = "0.6.1"
 x86_64 = "0.15.4"
 
 [build-dependencies]

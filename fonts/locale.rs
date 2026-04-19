@@ -1,5 +1,5 @@
 // ============================================================
-// LOCALE — NeroShiza Multilingual Render Pipeline
+// LOCALE — NeroShizaDev Multilingual Render Pipeline
 // ============================================================
 // Слои пайплайна:
 //   KernelEvent
@@ -224,7 +224,6 @@ pub fn print_rtl_line(text: &str, color: u8) {
 /// Фиолетовая рамка, чёрный фон внутри.
 /// Безопасно в любом контексте (включая double fault handler).
 pub unsafe fn render_panic_screen(ev: KernelEvent) {
-    crate::serial_println!("[АББАДОН] Аварийный экран: {:?}", ev);
     const ATTR_FRAME: u8 = 0x5F; // White on Magenta  — рамка
     const ATTR_TITLE: u8 = 0x5E; // Yellow on Magenta — заголовок в рамке
     const ATTR_TEXT:  u8 = 0x0F; // Bright White on Black — основной текст
@@ -292,7 +291,7 @@ pub unsafe fn render_panic_screen(ev: KernelEvent) {
     core::ptr::write_volatile(VGA.add(off_br + 1), ATTR_FRAME);
 
     // --- Строка 0: заголовок в рамке ---
-    let hdr = b">>> NeroShizaOS KERNEL EVENT <<<";
+    let hdr = b">>> NeroShizaDev-OS KERNEL EVENT <<<";
     let hdr_start = (W - hdr.len()) / 2; // центрируем
     for (i, &b) in hdr.iter().enumerate() {
         let off = (hdr_start + i) * 2;

@@ -14,7 +14,7 @@ if /I "%~1"=="--build-only" set "BUILD_ONLY=1"
 if /I "%~1"=="--debug" set "DEBUG_GDB=1"
 if /I "%~2"=="--debug" set "DEBUG_GDB=1"
 
-echo [*] NeroShizaDev OS v0.2 - Sborka...
+echo [*] NeroShizaDev-OS v0.3 - Sborka...
 cargo build --bin blog_os
 if errorlevel 1 (
     echo [!] Oshibka sborki yadra.

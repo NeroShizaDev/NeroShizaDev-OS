@@ -6,6 +6,67 @@
 // ============================================================
 
 use x86_64::instructions::port::Port;
+use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum InputOwner {
+    Shell = 0,
+    Apps = 1,
+}
+
+const SCANCODE_QUEUE_SIZE: usize = 64;
+static mut SCANCODE_QUEUE: [u8; SCANCODE_QUEUE_SIZE] = [0; SCANCODE_QUEUE_SIZE];
+static SCANCODE_HEAD: AtomicUsize = AtomicUsize::new(0);
+static SCANCODE_TAIL: AtomicUsize = AtomicUsize::new(0);
+static INPUT_OWNER: AtomicU8 = AtomicU8::new(InputOwner::Shell as u8);
+
+#[inline]
+pub fn set_input_owner(owner: InputOwner) {
+    INPUT_OWNER.store(owner as u8, Ordering::Release);
+}
+
+#[inline]
+pub fn input_owner() -> InputOwner {
+    match INPUT_OWNER.load(Ordering::Acquire) {
+        1 => InputOwner::Apps,
+        _ => InputOwner::Shell,
+    }
+}
+
+#[inline]
+pub fn clear_scancode_queue() {
+    SCANCODE_HEAD.store(0, Ordering::Release);
+    SCANCODE_TAIL.store(0, Ordering::Release);
+}
+
+#[inline]
+pub fn push_scancode_from_irq(scancode: u8) {
+    let head = SCANCODE_HEAD.load(Ordering::Relaxed);
+    let next = (head + 1) % SCANCODE_QUEUE_SIZE;
+    let tail = SCANCODE_TAIL.load(Ordering::Acquire);
+    if next == tail {
+        return;
+    }
+
+    unsafe {
+        SCANCODE_QUEUE[head] = scancode;
+    }
+    SCANCODE_HEAD.store(next, Ordering::Release);
+}
+
+#[inline]
+fn pop_scancode_from_queue() -> Option<u8> {
+    let tail = SCANCODE_TAIL.load(Ordering::Acquire);
+    let head = SCANCODE_HEAD.load(Ordering::Acquire);
+    if tail == head {
+        return None;
+    }
+
+    let sc = unsafe { SCANCODE_QUEUE[tail] };
+    SCANCODE_TAIL.store((tail + 1) % SCANCODE_QUEUE_SIZE, Ordering::Release);
+    Some(sc)
+}
 
 /// Проверяет бит OBF (Output Buffer Full) регистра статуса 0x64.
 /// Возвращает true если в буфере 0x60 есть скан-код.
@@ -15,6 +76,9 @@ use x86_64::instructions::port::Port;
 /// Bare-metal ядро: единственный потребитель PS/2 контроллера.
 #[inline(always)]
 pub unsafe fn has_scancode() -> bool {
+    if SCANCODE_TAIL.load(Ordering::Acquire) != SCANCODE_HEAD.load(Ordering::Acquire) {
+        return true;
+    }
     Port::<u8>::new(0x64).read() & 0x01 != 0
 }
 
@@ -27,6 +91,9 @@ pub unsafe fn has_scancode() -> bool {
 /// Вызывать только когда OBF=1 (проверено has_scancode).
 #[inline(always)]
 pub unsafe fn read_scancode() -> u8 {
+    if let Some(sc) = pop_scancode_from_queue() {
+        return sc;
+    }
     Port::<u8>::new(0x60).read()
 }
 

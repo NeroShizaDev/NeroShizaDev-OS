@@ -334,7 +334,7 @@ pub unsafe fn force_text_mode_3() {
 }
 
 /// Устанавливает стандартную 16-цветную палитру VGA для текстового режима.
-unsafe fn set_default_text_palette() {
+pub unsafe fn set_default_text_palette() {
     // Стандартная EGA/VGA палитра: 16 цветов × RGB (6-бит VGA DAC)
     static PALETTE: [[u8; 3]; 16] = [
         [0x00, 0x00, 0x00], // 0: Black
@@ -374,7 +374,7 @@ unsafe fn set_default_text_palette() {
 ///
 /// # Safety
 /// Переключает VGA в font mode (plane 2), пишет в 0xA0000, восстанавливает text mode.
-unsafe fn load_bios_font_8x16() {
+pub unsafe fn load_bios_font_8x16() {
     use crate::fonts::bios_font::VGA_FONT_8X16;
 
     enter_font_mode();
@@ -393,4 +393,42 @@ unsafe fn load_bios_font_8x16() {
     }
 
     exit_font_mode();
+}
+
+// ============================================================
+// RESTORE TEXT MODE — полный возврат из Mode 13h / любого графического режима
+// ============================================================
+// Шаг 1: Перепрограммируем все VGA-регистры (Misc/SEQ/CRTC/GC/AC) для Mode 3.
+// Шаг 2: Восстанавливаем стандартную 16-цветную EGA/VGA палитру DAC (0x3C8/0x3C9).
+// Шаг 3: Загружаем ASCII шрифт (0-127) в Plane 2 по адресу 0xA0000.
+// Шаг 4: Очищаем текстовый буфер 0xB8000 (80×25 = 2000 ячеек, attr 0x07).
+//
+// После возврата из Doom вызывать:
+//   unsafe { crate::vga_hw::restore_text_mode(); }
+//   unsafe { crate::vga_unicode::load_static_glyphs(); } // кириллица 128-191
+// ============================================================
+
+/// Полный возврат VGA в текстовый режим Mode 3 (80×25) из Mode 13h или любого графического режима.
+///
+/// Выполняет 4 шага Ритуала Восстановления:
+/// 1. Перепрограммирует все VGA-регистры (Misc / SEQ / CRTC / GC / AC)
+/// 2. Восстанавливает стандартную EGA/VGA палитру DAC (16 цветов)
+/// 3. Загружает ASCII 8×16 шрифт в Plane 2 (0xA0000)
+/// 4. Очищает текстовый буфер 0xB8000 пробелами (attr 0x07)
+///
+/// # Safety
+/// Перепрограммирует все VGA-регистры и пишет в VGA-память.
+/// Вызывать только когда Mode 13h (или другой граф. режим) активен.
+/// После вызова 0xB8000 снова является текстовым буфером.
+pub unsafe fn restore_text_mode() {
+    // Шаг 1: Регистры — reuse force_text_mode_3() который уже делает шаги 1+2+3+4
+    // НО force_text_mode_3() пишет VBE disable (0x01CE/0x01CF) — это безвредно
+    // после Mode 13h, т.к. VBE уже был отключён при входе в Mode 13h.
+    force_text_mode_3();
+    // force_text_mode_3() уже делает:
+    //   - Шаг 1: все VGA-регистры (Misc/SEQ/CRTC/GC/AC)
+    //   - Шаг 2: set_default_text_palette() — 16 EGA цветов
+    //   - Шаг 3: load_bios_font_8x16() — ASCII шрифт в Plane 2
+    //   - Шаг 4: очистку 0xB8000 (0x0720 = пробел + attr gray-on-black)
+    // Ничего дополнительного не нужно.
 }

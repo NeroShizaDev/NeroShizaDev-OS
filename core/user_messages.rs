@@ -95,18 +95,18 @@ pub fn text(locale: Locale, key: UiText) -> &'static str {
         (Locale::RuRu, UiText::Phase6FontLocaleOk) => "[Фаза 6] Шрифт: кириллица загружена | Локаль: активна",
         (Locale::EnUs, UiText::Phase6FontLocaleOk) => "[Phase 6] Font: Cyrillic loaded | Locale: active",
         (Locale::ArEg, UiText::Phase6FontLocaleOk) => "[المرحلة 6] الخط: Cyrillic محمل | اللغة: مفعلة",
-        (Locale::RuRu, UiText::BootBannerTitle) => "=== NeroShizaDev OS v0.3 ===",
-        (Locale::EnUs, UiText::BootBannerTitle) => "=== NeroShizaDev OS v0.3 ===",
-        (Locale::ArEg, UiText::BootBannerTitle) => "=== NeroShizaDev OS v0.3 ===",
+        (Locale::RuRu, UiText::BootBannerTitle) => "=== NeroShizaDev-OS v0.3 ===",
+        (Locale::EnUs, UiText::BootBannerTitle) => "=== NeroShizaDev-OS v0.3 ===",
+        (Locale::ArEg, UiText::BootBannerTitle) => "=== NeroShizaDev-OS v0.3 ===",
         (Locale::RuRu, UiText::BootBannerUnicode) => "Unicode 17.0 / UTF-32 / UCS-4",
         (Locale::EnUs, UiText::BootBannerUnicode) => "Unicode 17.0 / UTF-32 / UCS-4",
         (Locale::ArEg, UiText::BootBannerUnicode) => "Unicode 17.0 / UTF-32 / UCS-4",
         (Locale::RuRu, UiText::SystemReadyHint) => "Система готова. Введи 'помощь' или 'help'",
         (Locale::EnUs, UiText::SystemReadyHint) => "System ready. Type 'help'",
         (Locale::ArEg, UiText::SystemReadyHint) => "النظام جاهز. اكتب 'help'",
-        (Locale::RuRu, UiText::MengerDone) => "NeroShiza: Губка Менгера завершена.",
-        (Locale::EnUs, UiText::MengerDone) => "NeroShiza: Menger sponge complete.",
-        (Locale::ArEg, UiText::MengerDone) => "NeroShiza: اكتمل عرض Menger.",
+        (Locale::RuRu, UiText::MengerDone) => "NeroShizaDev: Губка Менгера завершена.",
+        (Locale::EnUs, UiText::MengerDone) => "NeroShizaDev: Menger sponge complete.",
+        (Locale::ArEg, UiText::MengerDone) => "NeroShizaDev: اكتمل عرض Menger.",
         (Locale::RuRu, UiText::BeeperStart) => "--- 16-нотная гексатоника (PC Speaker) ---",
         (Locale::EnUs, UiText::BeeperStart) => "--- 16-note hexatonic (PC Speaker) ---",
         (Locale::ArEg, UiText::BeeperStart) => "--- مقياس 16 نغمة (PC Speaker) ---",
@@ -364,3 +364,97 @@ pub fn print_voodoo_step(step: usize, p0: f32, p1: f32, p2: f32, p3: f32, p4: f3
         Locale::EnUs | Locale::ArEg => crate::locale::print_localized_fmt(0x0E, format_args!("Step {:>2}: [{:.3}, {:.3}, {:.3}, {:.3}, {:.3}]", step, p0, p1, p2, p3, p4)),
     }
 }
+
+// ============================================================
+// JACKAL messages (used by apps/jackal/shell.rs)
+// ============================================================
+
+pub fn print_jackal_header(label: &str, size: u64) {
+    crate::locale::print_localized_fmt(0x0E, format_args!("=== JACKAL: {} ({} bytes) ===", label, size));
+}
+
+pub fn print_jackal_footer() {
+    crate::locale::print_localized_line("=== END JACKAL REPORT ===", 0x08);
+}
+
+pub fn print_jackal_magic(offset: usize, name: &str, kind_short: &str) {
+    crate::locale::print_localized_fmt(0x0A, format_args!("[MAGIC] {} @0x{:02X} -> {}", name, offset, kind_short));
+}
+
+pub fn print_jackal_no_magic() {
+    crate::locale::print_localized_line("[MAGIC] none", 0x08);
+}
+
+pub fn print_jackal_entropy(h_int: u64, h_frac: u64) {
+    crate::locale::print_localized_fmt(0x07, format_args!("[ENTROPY] {}.{:03} bit/byte", h_int, h_frac));
+}
+
+pub fn print_jackal_histogram_stats(unique: u32, printable_bp: u32, zero_bp: u32) {
+    crate::locale::print_localized_fmt(
+        0x07,
+        format_args!(
+            "[HIST] unique={} printable={}.{}% zero={}.{}%",
+            unique,
+            printable_bp / 10,
+            printable_bp % 10,
+            zero_bp / 10,
+            zero_bp % 10,
+        ),
+    );
+}
+
+pub fn print_jackal_profile_summary(blocks: u32, h_min: u16, h_max: u16, transitions: u32) {
+    crate::locale::print_localized_fmt(
+        0x07,
+        format_args!(
+            "[PROFILE] blocks={} h_min={} h_max={} transitions={}",
+            blocks, h_min, h_max, transitions
+        ),
+    );
+}
+
+pub fn print_jackal_sparkline(line: &[u8]) {
+    if let Ok(s) = core::str::from_utf8(line) {
+        crate::locale::print_localized_fmt(0x0B, format_args!("[PROFILE] {}", s));
+    } else {
+        crate::locale::print_localized_line("[PROFILE] <binary>", 0x08);
+    }
+}
+
+pub fn print_jackal_autocorr_summary(period: u32, pct_int: u32, pct_frac: u32) {
+    crate::locale::print_localized_fmt(
+        0x07,
+        format_args!("[AUTOCORR] best period={} match={}.{}%", period, pct_int, pct_frac),
+    );
+}
+
+pub fn print_jackal_autocorr_row(period: u32, pct_int: u32, pct_frac: u32) {
+    crate::locale::print_localized_fmt(
+        0x08,
+        format_args!("[AUTOCORR] p={:>3} -> {}.{}%", period, pct_int, pct_frac),
+    );
+}
+
+pub fn print_jackal_classification(kind_name: &str, confidence_milli: u32) {
+    crate::locale::print_localized_fmt(
+        0x0F,
+        format_args!(
+            "[CLASS] {} (confidence {}.{}%)",
+            kind_name,
+            confidence_milli / 10,
+            confidence_milli % 10,
+        ),
+    );
+}
+
+pub fn print_jackal_voodoo_priors(priors_milli: &[u32; 6]) {
+    let labels = ["TEXT", "EXEC", "COMP", "RAND", "STRC", "MEDIA"];
+    crate::locale::print_localized_line("[VDOO] priors:", 0x0D);
+    for i in 0..6 {
+        crate::locale::print_localized_fmt(
+            0x08,
+            format_args!("[VDOO] {}: 0.{:03}", labels[i], priors_milli[i]),
+        );
+    }
+}
+

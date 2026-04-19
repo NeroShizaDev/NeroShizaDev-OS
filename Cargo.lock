@@ -3,6 +3,20 @@
 version = 4
 
 [[package]]
+name = "NeroShizaDev-OS"
+version = "0.3.0"
+dependencies = [
+ "bootloader",
+ "bootloader_api",
+ "lazy_static",
+ "pc-keyboard",
+ "pic8259",
+ "spin 0.10.0",
+ "uart_16550",
+ "x86_64",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -45,21 +59,6 @@ dependencies = [
  "radium",
  "tap",
  "wyz",
-]
-
-[[package]]
-name = "blog_os"
-version = "0.1.0"
-dependencies = [
- "bootloader",
- "bootloader_api",
- "lazy_static",
- "pc-keyboard",
- "pic8259",
- "spin 0.10.0",
- "uart_16550",
- "volatile 0.6.1",
- "x86_64",
 ]
 
 [[package]]
@@ -572,12 +571,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "442887c63f2c839b346c192d047a7c87e73d0689c9157b00b53dcc27dd5ea793"
 
 [[package]]
-name = "volatile"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af8ca9a5d4debca0633e697c88269395493cebf2e10db21ca2dbde37c1356452"
-
-[[package]]
 name = "wasip2"
 version = "1.0.2+wasi-0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -796,7 +789,7 @@ dependencies = [
  "bitflags 2.11.1",
  "const_fn",
  "rustversion",
- "volatile 0.4.6",
+ "volatile",
 ]
 
 [[package]]

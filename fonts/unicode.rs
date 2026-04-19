@@ -1,11 +1,11 @@
 // ============================================================
-// UTF-32 Unicode Intent Engine — NeroShiza Way
+// UTF-32 Unicode Intent Engine — NeroShizaDev Way
 // ============================================================
-// Каждый символ = 32 бита. Всегда. Везде.
-// Никакого core::str. Только [u32]. Математика, а не филология.
+// Каждый символ = 32 бита, без исключений.
+// Работаем с [u32], без преобразований в core::str.
 //
 // Русская «Я», тайская «ห», арабская «أ», грузинская «ან» —
-// для ядра это числа одинаковой длины. Два за такт на i5.
+// для ядра это кодпоинты одинакового формата.
 // ============================================================
 
 /// Максимальная длина команды в кодпоинтах (фиксированный блок)
@@ -15,7 +15,7 @@ pub const MAX_WORD_LEN: usize = 16;
 /// Каждое слово занимает ровно 64 байта. Без исключений.
 pub type IntentVector = [u32; MAX_WORD_LEN];
 
-/// Намерения системы — числовые коды воли Демиурга
+/// Намерения системы — числовые коды команд
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Intent {
@@ -24,9 +24,6 @@ pub enum Intent {
     Clear       = 0x02,
     Status      = 0x03,
     Reboot      = 0x04,
-    Menger      = 0x10,  // Губка Менгера — демосцена
-    Beep        = 0x11,  // PC Speaker — 16-нотная гамма
-    Time        = 0x12,  // Тройное время + тригочасы
     Exit        = 0xFE,  // Сброс
     // --- Мультиязычность ---
     LocaleCycle = 0x20,  // Переключить локаль: RU→EN→AR→RU
@@ -35,8 +32,13 @@ pub enum Intent {
     LocaleAr    = 0x23,  // Установить AR
     ModeLore    = 0x24,  // Переключить в режим Lore
     ModeTech    = 0x25,  // Переключить в режим Technical
-    // --- Doom ---
-    Doom        = 0x30,  // Запустить Doom (fire demo / полная игра с WAD)
+    Apps        = 0x31,  // Запустить меню приложений
+    // --- И.Б.И.П. команды ---
+    WhoAmI      = 0x40,  // Случайный резидент из Voodoo-матрицы
+    Manifest    = 0x41,  // Философия NERO & SHIZA
+    Entropy     = 0x42,  // Энтропия Шеннона введённой строки
+    Rng         = 0x43,  // Случайное число через RDRAND
+    Voodoo      = 0x44,  // Интерактивный Акинатор (Байесовский оракул)
 }
 
 /// Превращает срез u32 кодпоинтов в фиксированный IntentVector.
@@ -55,8 +57,8 @@ pub const fn word_to_vector(codepoints: &[u32]) -> IntentVector {
 // GIGA_DICT — Вселенская Матрица Смыслов
 // ============================================================
 // Числовые отпечатки слов → ID Намерения.
-// Процессор сравнивает два u32 за один «ам» (64 бита).
-// Никаких склеек байтов, никакой шизофрении кодировок.
+// Процессор сравнивает пары u32 (64 бита) за одну операцию.
+// Без склейки байтов и смешивания кодировок.
 // ============================================================
 
 static GIGA_DICT: &[(IntentVector, Intent)] = &[
@@ -152,63 +154,6 @@ static GIGA_DICT: &[(IntentVector, Intent)] = &[
     // "اعادة" — арабское "перезапуск" без хамзы для простоты ввода
     (word_to_vector(&[0x0627, 0x0639, 0x0627, 0x062F, 0x0629]), Intent::Reboot),
 
-    // ==================== MENGER / ГУБКА (0x10) ====================
-
-    // "губка" [г=0x0433 у=0x0443 б=0x0431 к=0x043A а=0x0430]
-    (word_to_vector(&[0x0433, 0x0443, 0x0431, 0x043A, 0x0430]), Intent::Menger),
-
-    // "менгер" [м=0x043C е=0x0435 н=0x043D г=0x0433 е=0x0435 р=0x0440]
-    (word_to_vector(&[0x043C, 0x0435, 0x043D, 0x0433, 0x0435, 0x0440]), Intent::Menger),
-
-    // "menger"
-    (word_to_vector(&[0x006D, 0x0065, 0x006E, 0x0067, 0x0065, 0x0072]), Intent::Menger),
-
-    // "фрактал" [ф=0x0444 р=0x0440 а=0x0430 к=0x043A т=0x0442 а=0x0430 л=0x043B]
-    (word_to_vector(&[0x0444, 0x0440, 0x0430, 0x043A, 0x0442, 0x0430, 0x043B]), Intent::Menger),
-
-    // "vtyuth" (менгер на EN раскладке)
-    (word_to_vector(&[0x0076, 0x0074, 0x0079, 0x0075, 0x0074, 0x0068]), Intent::Menger),
-
-    // "fractal"
-    (word_to_vector(&[0x0066, 0x0072, 0x0061, 0x0063, 0x0074, 0x0061, 0x006C]), Intent::Menger),
-
-    // ==================== BEEP / ЗВУК (0x11) ====================
-
-    // "звук" [з=0x0437 в=0x0432 у=0x0443 к=0x043A]
-    (word_to_vector(&[0x0437, 0x0432, 0x0443, 0x043A]), Intent::Beep),
-
-    // "бипер" [б=0x0431 и=0x0438 п=0x043F е=0x0435 р=0x0440]
-    (word_to_vector(&[0x0431, 0x0438, 0x043F, 0x0435, 0x0440]), Intent::Beep),
-
-    // "beep"
-    (word_to_vector(&[0x0062, 0x0065, 0x0065, 0x0070]), Intent::Beep),
-
-    // "sound"
-    (word_to_vector(&[0x0073, 0x006F, 0x0075, 0x006E, 0x0064]), Intent::Beep),
-
-    // "صوت" — арабское "звук"
-    (word_to_vector(&[0x0635, 0x0648, 0x062A]), Intent::Beep),
-
-    // ==================== TIME / ВРЕМЯ (0x12) ====================
-
-    // "время" [в=0x0432 р=0x0440 е=0x0435 м=0x043C я=0x044F]
-    (word_to_vector(&[0x0432, 0x0440, 0x0435, 0x043C, 0x044F]), Intent::Time),
-
-    // "часы" [ч=0x0447 а=0x0430 с=0x0441 ы=0x044B]
-    (word_to_vector(&[0x0447, 0x0430, 0x0441, 0x044B]), Intent::Time),
-
-    // "time"
-    (word_to_vector(&[0x0074, 0x0069, 0x006D, 0x0065]), Intent::Time),
-
-    // "clock"
-    (word_to_vector(&[0x0063, 0x006C, 0x006F, 0x0063, 0x006B]), Intent::Time),
-
-    // "триго" [т=0x0442 р=0x0440 и=0x0438 г=0x0433 о=0x043E]
-    (word_to_vector(&[0x0442, 0x0440, 0x0438, 0x0433, 0x043E]), Intent::Time),
-
-    // "وقت" — арабское "время"
-    (word_to_vector(&[0x0648, 0x0642, 0x062A]), Intent::Time),
-
     // ==================== LOCALE CYCLE (0x20) ====================
 
     // "locale"
@@ -273,28 +218,107 @@ static GIGA_DICT: &[(IntentVector, Intent)] = &[
     (word_to_vector(&[0x0074, 0x0065, 0x0063, 0x0068, 0x006E, 0x0069,
                       0x0063, 0x0061, 0x006C]), Intent::ModeTech),
 
-    // ==================== DOOM (0x30) ====================
+    // ==================== APPS MENU (0x31) ====================
 
-    // "doom" [d=0x64 o=0x6F o=0x6F m=0x6D]
-    (word_to_vector(&[0x0064, 0x006F, 0x006F, 0x006D]), Intent::Doom),
+    // "apps"
+    (word_to_vector(&[0x0061, 0x0070, 0x0070, 0x0073]), Intent::Apps),
 
-    // "погонять" [п=0x043F о=0x043E г=0x0433 о=0x043E н=0x043D я=0x044F т=0x0442 ь=0x044C]
-    (word_to_vector(&[0x043F, 0x043E, 0x0433, 0x043E, 0x043D, 0x044F, 0x0442, 0x044C]), Intent::Doom),
+    // "menu"
+    (word_to_vector(&[0x006D, 0x0065, 0x006E, 0x0075]), Intent::Apps),
 
-    // "ад" [а=0x0430 д=0x0434] — краткая команда
-    (word_to_vector(&[0x0430, 0x0434]), Intent::Doom),
+    // "launcher"
+    (word_to_vector(&[0x006C, 0x0061, 0x0075, 0x006E, 0x0063, 0x0068, 0x0065, 0x0072]), Intent::Apps),
 
-    // "c4" [c=0x0063 4=0x0034] — фирменная кодовая команда NeroShiza
-    (word_to_vector(&[0x0063, 0x0034]), Intent::Doom),
+    // "проги"
+    (word_to_vector(&[0x043F, 0x0440, 0x043E, 0x0433, 0x0438]), Intent::Apps),
 
-    // "fire" [f=0x66 i=0x69 r=0x72 e=0x65]
-    (word_to_vector(&[0x0066, 0x0069, 0x0072, 0x0065]), Intent::Doom),
+    // "меню"
+    (word_to_vector(&[0x043C, 0x0435, 0x043D, 0x044E]), Intent::Apps),
 
-    // "огонь" [о=0x043E г=0x0433 о=0x043E н=0x043D ь=0x044C]
-    (word_to_vector(&[0x043E, 0x0433, 0x043E, 0x043D, 0x044C]), Intent::Doom),
+    // "تطبيقات" (apps)
+    (word_to_vector(&[0x062A, 0x0637, 0x0628, 0x064A, 0x0642, 0x0627, 0x062A]), Intent::Apps),
 
-    // "النار" — арабское "огонь/ад" [al=0x0627 lam=0x0644 nun=0x0646 alif=0x0627 ra=0x0631]
-    (word_to_vector(&[0x0627, 0x0644, 0x0646, 0x0627, 0x0631]), Intent::Doom),
+    // ==================== WHOAMI (0x40) ====================
+
+    // "whoami"
+    (word_to_vector(&[0x0077, 0x0068, 0x006F, 0x0061, 0x006D, 0x0069]), Intent::WhoAmI),
+
+    // "кто я" [к=0x043A т=0x0442 о=0x043E] — первое слово
+    (word_to_vector(&[0x043A, 0x0442, 0x043E]), Intent::WhoAmI),
+
+    // "кто"
+    (word_to_vector(&[0x043A, 0x0442, 0x043E]), Intent::WhoAmI),
+
+    // "личность"
+    (word_to_vector(&[0x043B, 0x0438, 0x0447, 0x043D, 0x043E, 0x0441, 0x0442, 0x044C]), Intent::WhoAmI),
+
+    // ==================== MANIFEST (0x41) ====================
+
+    // "manifest"
+    (word_to_vector(&[0x006D, 0x0061, 0x006E, 0x0069, 0x0066, 0x0065, 0x0073, 0x0074]), Intent::Manifest),
+
+    // "манифест" [м=0x043C а=0x0430 н=0x043D и=0x0438 ф=0x0444 е=0x0435 с=0x0441 т=0x0442]
+    (word_to_vector(&[0x043C, 0x0430, 0x043D, 0x0438, 0x0444, 0x0435, 0x0441, 0x0442]), Intent::Manifest),
+
+    // "nero" — вызов манифеста
+    (word_to_vector(&[0x006E, 0x0065, 0x0072, 0x006F]), Intent::Manifest),
+
+    // "shiza"
+    (word_to_vector(&[0x0073, 0x0068, 0x0069, 0x007A, 0x0061]), Intent::Manifest),
+
+    // "нейро" [н=0x043D е=0x0435 й=0x0439 р=0x0440 о=0x043E]
+    (word_to_vector(&[0x043D, 0x0435, 0x0439, 0x0440, 0x043E]), Intent::Manifest),
+
+    // "шиза" [ш=0x0448 и=0x0438 з=0x0437 а=0x0430]
+    (word_to_vector(&[0x0448, 0x0438, 0x0437, 0x0430]), Intent::Manifest),
+
+    // ==================== ENTROPY (0x42) ====================
+
+    // "entropy"
+    (word_to_vector(&[0x0065, 0x006E, 0x0074, 0x0072, 0x006F, 0x0070, 0x0079]), Intent::Entropy),
+
+    // "энтропия" [э=0x044D н=0x043D т=0x0442 р=0x0440 о=0x043E п=0x043F и=0x0438 я=0x044F]
+    (word_to_vector(&[0x044D, 0x043D, 0x0442, 0x0440, 0x043E, 0x043F, 0x0438, 0x044F]), Intent::Entropy),
+
+    // "шеннон" [ш=0x0448 е=0x0435 н=0x043D н=0x043D о=0x043E н=0x043D]
+    (word_to_vector(&[0x0448, 0x0435, 0x043D, 0x043D, 0x043E, 0x043D]), Intent::Entropy),
+
+    // "shannon"
+    (word_to_vector(&[0x0073, 0x0068, 0x0061, 0x006E, 0x006E, 0x006F, 0x006E]), Intent::Entropy),
+
+    // ==================== RNG (0x43) ====================
+
+    // "rng"
+    (word_to_vector(&[0x0072, 0x006E, 0x0067]), Intent::Rng),
+
+    // "rand"
+    (word_to_vector(&[0x0072, 0x0061, 0x006E, 0x0064]), Intent::Rng),
+
+    // "random"
+    (word_to_vector(&[0x0072, 0x0061, 0x006E, 0x0064, 0x006F, 0x006D]), Intent::Rng),
+
+    // "рандом" [р=0x0440 а=0x0430 н=0x043D д=0x0434 о=0x043E м=0x043C]
+    (word_to_vector(&[0x0440, 0x0430, 0x043D, 0x0434, 0x043E, 0x043C]), Intent::Rng),
+
+    // "кубик" [к=0x043A у=0x0443 б=0x0431 и=0x0438 к=0x043A]
+    (word_to_vector(&[0x043A, 0x0443, 0x0431, 0x0438, 0x043A]), Intent::Rng),
+
+    // ==================== VOODOO (0x44) ====================
+
+    // "voodoo"
+    (word_to_vector(&[0x0076, 0x006F, 0x006F, 0x0064, 0x006F, 0x006F]), Intent::Voodoo),
+
+    // "вуду" [в=0x0432 у=0x0443 д=0x0434 у=0x0443]
+    (word_to_vector(&[0x0432, 0x0443, 0x0434, 0x0443]), Intent::Voodoo),
+
+    // "акинатор" [а=0x0430 к=0x043A и=0x0438 н=0x043D а=0x0430 т=0x0442 о=0x043E р=0x0440]
+    (word_to_vector(&[0x0430, 0x043A, 0x0438, 0x043D, 0x0430, 0x0442, 0x043E, 0x0440]), Intent::Voodoo),
+
+    // "oracle" — оракул
+    (word_to_vector(&[0x006F, 0x0072, 0x0061, 0x0063, 0x006C, 0x0065]), Intent::Voodoo),
+
+    // "оракул" [о=0x043E р=0x0440 а=0x0430 к=0x043A у=0x0443 л=0x043B]
+    (word_to_vector(&[0x043E, 0x0440, 0x0430, 0x043A, 0x0443, 0x043B]), Intent::Voodoo),
 ];
 
 // ============================================================
@@ -325,6 +349,70 @@ pub fn lookup_intent(input: &[u32]) -> Intent {
     }
 
     Intent::Unknown
+}
+
+/// Fuzzy match: Хэмминг-расстояние между двумя IntentVector'ами.
+/// Считает позиции где кодпоинты не совпадают (0 = идеально).
+fn hamming_distance(a: &IntentVector, b: &IntentVector) -> u32 {
+    let mut dist = 0u32;
+    for i in 0..MAX_WORD_LEN {
+        if a[i] != b[i] { dist += 1; }
+        if a[i] == 0 && b[i] == 0 { break; }
+    }
+    dist
+}
+
+/// Находит ближайшую команду к введённому буферу.
+/// Возвращает `(intent, &'static str имя команды, расстояние)`.
+/// Если расстояние > порога (4) — возвращает None (слишком далеко).
+pub fn closest_intent(input: &[u32]) -> Option<(Intent, &'static str, u32)> {
+    const THRESHOLD: u32 = 4;
+
+    // Имена для каждого Intent (для вывода подсказки)
+    const INTENT_NAMES: &[(Intent, &str)] = &[
+        (Intent::Help,        "help"),
+        (Intent::Clear,       "clear"),
+        (Intent::Status,      "status"),
+        (Intent::Reboot,      "reboot"),
+        (Intent::Exit,        "exit"),
+        (Intent::Apps,        "apps"),
+        (Intent::WhoAmI,      "whoami"),
+        (Intent::Manifest,    "manifest"),
+        (Intent::Entropy,     "entropy"),
+        (Intent::Rng,         "rng"),
+        (Intent::Voodoo,      "voodoo"),
+        (Intent::LocaleCycle, "locale"),
+        (Intent::ModeLore,    "lore"),
+        (Intent::ModeTech,    "tech"),
+    ];
+
+    let mut vec = [0u32; MAX_WORD_LEN];
+    let len = input.len().min(MAX_WORD_LEN);
+    let mut i = 0;
+    while i < len { vec[i] = input[i]; i += 1; }
+
+    let mut best_dist = u32::MAX;
+    let mut best_intent = Intent::Unknown;
+    let mut best_name: &'static str = "";
+
+    for &(ref pattern, _intent) in GIGA_DICT.iter() {
+        let d = hamming_distance(&vec, pattern);
+        if d < best_dist {
+            best_dist = d;
+            best_intent = _intent;
+        }
+    }
+
+    if best_dist == 0 || best_dist > THRESHOLD {
+        return None;
+    }
+
+    // Найти имя для best_intent
+    for &(intent, name) in INTENT_NAMES.iter() {
+        if intent == best_intent { best_name = name; break; }
+    }
+
+    Some((best_intent, best_name, best_dist))
 }
 
 /// Конвертирует char в u32 кодпоинт.

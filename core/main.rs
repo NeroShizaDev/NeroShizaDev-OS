@@ -256,7 +256,7 @@ fn print_ready_message() {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     blog_os::serial_println!("[ЯДРО] ПАНИКА: {}", info);
-    blog_os::trace::record("panic handler entered");
+    blog_os::trace::record_fatal("panic handler entered");
     // Рисуем аварийный экран на VGA
     unsafe {
         blog_os::locale::render_panic_screen(blog_os::kernel_messages::KernelEvent::Panic);

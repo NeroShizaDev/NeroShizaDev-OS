@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>☢️ Ядерный Чистильщик v2.0 | NeroShiza Dev</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Unbounded:wght@400;700;900&display=swap');
+
+:root {
+  --neon: #ff3c3c;
+  --neon-glow: rgba(255,60,60,0.25);
+  --acid: #00ff88;
+  --acid-glow: rgba(0,255,136,0.2);
+  --bg: #0a0a12;
+  --surface: #12121f;
+  --surface2: #1a1a2e;
+  --border: #2a2a44;
+  --text: #e8e8f0;
+  --text-dim: #6a6a8a;
+  --warn: #ffb347;
+  --radius: 12px;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Фоновая сетка */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    linear-gradient(rgba(255,60,60,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,60,60,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Заголовок */
+.header {
+  text-align: center;
+  padding: 32px 20px 20px;
+  position: relative;
+  z-index: 1;
+}
+
+.header h1 {
+  font-family: 'Unbounded', sans-serif;
+  font-weight: 900;
+  font-size: clamp(24px, 5vw, 42px);
+  color: var(--neon);
+  text-shadow: 0 0 30px var(--neon-glow), 0 0 60px rgba(255,60,60,0.1);
+  letter-spacing: 2px;
+  margin-bottom: 6px;
+}
+
+.header .subtitle {
+  color: var(--text-dim);
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.version-badge {
+  display: inline-block;
+  background: var(--neon);
+  color: #000;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+  margin-left: 8px;
+  vertical-align: super;
+}
+
+/* Основной контейнер */
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 20px 40px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Переключатель режимов */
+.mode-switcher {
+  display: flex;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+
+.mode-btn {
+  flex: 1;
+  min-width: 100px;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.mode-btn:hover { color: var(--text); background: var(--surface2); }
+.mode-btn.active {
+  background: var(--neon);
+  color: #000;
+  box-shadow: 0 0 20px var(--neon-glow);
+}
+
+/* Зона дропа файлов */
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  text-align: center;
+  margin-bottom: 16px;
+  transition: all 0.3s;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.drop-zone::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,60,60,0.03), transparent);
+  pointer-events: none;
+}
+
+.drop-zone:hover, .drop-zone.dragover {
+  border-color: var(--neon);
+  background: rgba(255,60,60,0.05);
+  box-shadow: inset 0 0 30px rgba(255,60,60,0.05);
+}
+
+.drop-zone .icon { font-size: 36px; margin-bottom: 8px; }
+.drop-zone .label { color: var(--text-dim); font-size: 13px; }
+.drop-zone .label strong { color: var(--neon); }
+.drop-zone input[type="file"] { display: none; }
+
+.file-info {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.file-info.visible { display: flex; }
+.file-info .fname { color: var(--acid); flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.file-info .fsize { color: var(--text-dim); }
+.file-info .clear-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--neon);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.file-info .clear-btn:hover { background: var(--neon); color: #000; }
+
+/* Текстовые области */
+.text-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.text-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+}
+
+.text-panel-header .title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+}
+
+.text-panel-header .stats {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.text-panel-header .stats .num { color: var(--acid); font-weight: 700; }
+
+textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 16px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+textarea::placeholder { color: var(--text-dim); opacity: 0.5; }
+
+/* Кнопки действий */
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.btn-primary {
+  background: var(--neon);
+  color: #000;
+  box-shadow: 0 0 20px var(--neon-glow);
+}
+.btn-primary:hover {
+  box-shadow: 0 0 40px var(--neon-glow);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover { border-color: var(--text-dim); }
+
+.btn-acid {
+  background: var(--acid);
+  color: #000;
+  box-shadow: 0 0 20px var(--acid-glow);
+}
+.btn-acid:hover {
+  box-shadow: 0 0 40px var(--acid-glow);
+  transform: translateY(-1px);
+}
+
+/* Настройки JSON */
+.options-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.options-panel .opt-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.opt-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface2);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-size: 12px;
+}
+
+.opt-item:hover { background: var(--border); }
+
+.opt-item input[type="checkbox"] {
+  accent-color: var(--neon);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* JSON ключи для фильтрации */
+.json-keys-panel {
+  display: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.json-keys-panel.visible { display: block; }
+
+.json-keys-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.json-key-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.json-key-tag:hover { border-color: var(--acid); }
+.json-key-tag.selected { background: var(--acid); color: #000; border-color: var(--acid); }
+.json-key-tag .count { opacity: 0.6; font-size: 10px; }
+
+/* Прогресс-бар для PDF */
+.progress-bar {
+  display: none;
+  height: 3px;
+  background: var(--surface2);
+  border-radius: 2px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.progress-bar.visible { display: block; }
+.progress-bar .fill {
+  height: 100%;
+  background: var(--neon);
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.3s;
+  box-shadow: 0 0 10px var(--neon-glow);
+}
+
+/* Тост */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #000;
+  font-weight: 700;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.3s;
+  z-index: 9999;
+}
+
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.ok { background: var(--acid); }
+.toast.error { background: var(--neon); color: #fff; }
+.toast.warn { background: var(--warn); }
+
+/* Лог */
+.log-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  max-height: 120px;
+  overflow-y: auto;
+  font-size: 11px;
+  line-height: 1.8;
+  display: none;
+}
+
+.log-panel.visible { display: block; }
+.log-panel .log-line { color: var(--text-dim); }
+.log-panel .log-line .tag { font-weight: 700; }
+.log-panel .log-line .tag.ok { color: var(--acid); }
+.log-panel .log-line .tag.info { color: var(--neon); }
+.log-panel .log-line .tag.warn { color: var(--warn); }
+
+/* Футер */
+footer {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  position: relative;
+  z-index: 1;
+}
+
+footer span { color: var(--neon); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>☢️ ЯДЕРНЫЙ ЧИСТИЛЬЩИК <span class="version-badge">v2.0</span></h1>
+  <div class="subtitle">Извлечение текста из любого мусора</div>
+</div>
+
+<div class="container">
+  <!-- Режимы -->
+  <div class="mode-switcher">
+    <button class="mode-btn active" data-mode="auto">⚡ Авто</button>
+    <button class="mode-btn" data-mode="json">{ } JSON</button>
+    <button class="mode-btn" data-mode="fb2">📖 FB2 / XML</button>
+    <button class="mode-btn" data-mode="pdf">📄 PDF</button>
+    <button class="mode-btn" data-mode="html">🌐 HTML</button>
+    <button class="mode-btn" data-mode="raw">🧹 RAW</button>
+  </div>
+
+  <!-- Дроп-зона -->
+  <div class="drop-zone" id="dropZone">
+    <div class="icon">📂</div>
+    <div class="label">Перетащи файл сюда или <strong>нажми для выбора</strong></div>
+    <div class="label" style="margin-top:4px; font-size:11px;">JSON · FB2 · PDF · XML · HTML · TXT</div>
+    <input type="file" id="fileInput" accept=".json,.fb2,.pdf,.xml,.html,.htm,.txt,.csv,.log,.md" />
+  </div>
+
+  <div class="file-info" id="fileInfo">
+    <span class="fname" id="fileName"></span>
+    <span class="fsize" id="fileSize"></span>
+    <button class="clear-btn" id="clearFile" title="Убрать файл">×</button>
+  </div>
+
+  <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
+
+  <!-- Лог -->
+  <div class="log-panel" id="logPanel"></div>
+
+  <!-- Опции -->
+  <div class="options-panel">
+    <div class="opt-title">⚙ Настройки очистки</div>
+    <div class="options-grid">
+      <label class="opt-item"><input type="checkbox" id="optUrls" checked /> Убрать ссылки</label>
+      <label class="opt-item"><input type="checkbox" id="optMarkdown" checked /> Убрать Markdown **</label>
+      <label class="opt-item"><input type="checkbox" id="optHtmlTags" checked /> Убрать HTML теги</label>
+      <label class="opt-item"><input type="checkbox" id="optJsonMeta" checked /> Убрать JSON мета-поля</label>
+      <label class="opt-item"><input type="checkbox" id="optEscapes" checked /> Убрать \\n \\t \\r</label>
+      <label class="opt-item"><input type="checkbox" id="optBrackets" checked /> Убрать {}[]</label>
+      <label class="opt-item"><input type="checkbox" id="optQuotes" /> Убрать кавычки</label>
+      <label class="opt-item"><input type="checkbox" id="optExtraSpaces" checked /> Схлопнуть пробелы</label>
+      <label class="opt-item"><input type="checkbox" id="optParagraphs" checked /> Сохранить абзацы</label>
+      <label class="opt-item"><input type="checkbox" id="optNumbers" /> Убрать числа</label>
+    </div>
+  </div>
+
+  <!-- JSON ключи -->
+  <div class="json-keys-panel" id="jsonKeysPanel">
+    <div class="opt-title">🔑 Найденные JSON ключи (нажми чтобы выбрать)</div>
+    <div style="font-size:11px; color:var(--text-dim); margin-bottom:6px;">Выбранные ключи = только их значения попадут в результат</div>
+    <div class="json-keys-list" id="jsonKeysList"></div>
+  </div>
+
+  <!-- Ввод -->
+  <div class="text-panel">
+    <div class="text-panel-header">
+      <span class="title">📥 Входные данные</span>
+      <span class="stats" id="inputStats">символов: <span class="num">0</span></span>
+    </div>
+    <textarea id="inputText" placeholder="Вставь сюда JSON, XML, HTML или любой технический мусор..."></textarea>
+  </div>
+
+  <!-- Кнопки -->
+  <div class="actions">
+    <button class="btn btn-primary" id="cleanBtn">☢️ Уничтожить мусор</button>
+    <button class="btn btn-secondary" id="analyzeBtn">🔍 Анализ структуры</button>
+    <button class="btn btn-secondary" id="clearBtn">🗑 Очистить всё</button>
+  </div>
+
+  <!-- Вывод -->
+  <div class="text-panel">
+    <div class="text-panel-header">
+      <span class="title">📤 Чистый текст</span>
+      <span class="stats" id="outputStats">символов: <span class="num">0</span> | сжатие: <span class="num">0%</span></span>
+    </div>
+    <textarea id="outputText" placeholder="Здесь останется только смысл..." readonly></textarea>
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-acid" id="copyBtn">📋 Копировать</button>
+    <button class="btn btn-secondary" id="downloadBtn">💾 Скачать .txt</button>
+  </div>
+</div>
+
+<footer>NeroShiza Dev <span>☢</span> Ядерный Чистильщик v2.0 <span>☢</span></footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  // === Элементы ===
+  const $ = id => document.getElementById(id);
+  const inputText = $('inputText');
+  const outputText = $('outputText');
+  const fileInput = $('fileInput');
+  const dropZone = $('dropZone');
+  const logPanel = $('logPanel');
+  const progressBar = $('progressBar');
+  const progressFill = $('progressFill');
+  const jsonKeysPanel = $('jsonKeysPanel');
+  const jsonKeysList = $('jsonKeysList');
+
+  let currentMode = 'auto';
+  let loadedFileContent = null;
+  let parsedJsonData = null;
+  let selectedJsonKeys = new Set();
+
+  // === PDF.js ===
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  // === Тост ===
+  function toast(msg, type = 'ok', ms = 3000) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.className = `toast ${type} show`;
+    setTimeout(() => t.classList.remove('show'), ms);
+  }
+
+  // === Лог ===
+  function log(msg, tag = 'info') {
+    logPanel.classList.add('visible');
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML = `<span class="tag ${tag}">[${tag.toUpperCase()}]</span> ${msg}`;
+    logPanel.appendChild(line);
+    logPanel.scrollTop = logPanel.scrollHeight;
+  }
+
+  function clearLog() {
+    logPanel.innerHTML = '';
+    logPanel.classList.remove('visible');
+  }
+
+  // === Статистика ===
+  function updateStats() {
+    const inLen = inputText.value.length;
+    const outLen = outputText.value.length;
+    $('inputStats').innerHTML = `символов: <span class="num">${inLen.toLocaleString()}</span>`;
+    const pct = inLen > 0 ? Math.round((1 - outLen / inLen) * 100) : 0;
+    $('outputStats').innerHTML = `символов: <span class="num">${outLen.toLocaleString()}</span> | сжатие: <span class="num">${pct}%</span>`;
+  }
+
+  inputText.addEventListener('input', updateStats);
+
+  // === Режимы ===
+  document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentMode = btn.dataset.mode;
+    });
+  });
+
+  // === Определение формата ===
+  function detectFormat(text, fileName = '') {
+    const ext = fileName.split('.').pop().toLowerCase();
+    if (ext === 'pdf') return 'pdf';
+    if (ext === 'fb2') return 'fb2';
+    if (ext === 'json') return 'json';
+    if (ext === 'xml') return 'fb2';
+    if (ext === 'html' || ext === 'htm') return 'html';
+
+    const trimmed = text.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'json';
+    if (trimmed.startsWith('<?xml') || trimmed.startsWith('<FictionBook')) return 'fb2';
+    if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) return 'html';
+    return 'raw';
+  }
+
+  // === Дроп-зона ===
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+
+  $('clearFile').addEventListener('click', () => {
+    loadedFileContent = null;
+    fileInput.value = '';
+    $('fileInfo').classList.remove('visible');
+    inputText.value = '';
+    outputText.value = '';
+    updateStats();
+  });
+
+  // === Обработка файлов ===
+  async function handleFile(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    $('fileName').textContent = file.name;
+    $('fileSize').textContent = formatSize(file.size);
+    $('fileInfo').classList.add('visible');
+
+    clearLog();
+    log(`Загружен файл: ${file.name} (${formatSize(file.size)})`);
+
+    if (ext === 'pdf') {
+      await handlePDF(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = e => {
+        loadedFileContent = e.target.result;
+        inputText.value = loadedFileContent;
+        updateStats();
+        log(`Содержимое загружено: ${loadedFileContent.length.toLocaleString()} символов`, 'ok');
+
+        // Автоопределение режима
+        if (currentMode === 'auto') {
+          const fmt = detectFormat(loadedFileContent, file.name);
+          document.querySelectorAll('.mode-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.mode === fmt);
+          });
+          currentMode = fmt;
+          log(`Автоопределён формат: ${fmt.toUpperCase()}`, 'info');
+        }
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
+  }
+
+  // === PDF ===
+  async function handlePDF(file) {
+    if (!window.pdfjsLib) {
+      toast('PDF.js не загружен. Проверьте интернет.', 'error');
+      return;
+    }
+
+    progressBar.classList.add('visible');
+    progressFill.style.width = '0%';
+    log('Начинаю извлечение текста из PDF...', 'info');
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const totalPages = pdf.numPages;
+      log(`PDF загружен: ${totalPages} страниц`, 'ok');
+
+      let allText = '';
+
+      for (let i = 1; i <= totalPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map(item => item.str).join(' ');
+        allText += pageText + '\n\n';
+
+        const pct = Math.round((i / totalPages) * 100);
+        progressFill.style.width = pct + '%';
+
+        if (i % 10 === 0 || i === totalPages) {
+          log(`Обработано страниц: ${i}/${totalPages}`, 'info');
+        }
+      }
+
+      inputText.value = allText;
+      loadedFileContent = allText;
+      updateStats();
+      log(`Извлечено ${allText.length.toLocaleString()} символов из PDF`, 'ok');
+      toast(`PDF: ${totalPages} страниц обработано`, 'ok');
+
+      // Переключаемся в режим raw для PDF текста
+      if (currentMode === 'auto') {
+        document.querySelectorAll('.mode-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.mode === 'raw');
+        });
+        currentMode = 'raw';
+      }
+    } catch (e) {
+      log(`Ошибка PDF: ${e.message}`, 'warn');
+      toast('Ошибка чтения PDF', 'error');
+    }
+
+    setTimeout(() => progressBar.classList.remove('visible'), 500);
+  }
+
+  // === JSON парсинг ===
+  function extractJsonText(data, keys = null, depth = 0) {
+    const results = [];
+
+    if (typeof data === 'string') {
+      return [data];
+    }
+
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        results.push(...extractJsonText(item, keys, depth + 1));
+      }
+      return results;
+    }
+
+    if (data && typeof data === 'object') {
+      for (const [key, value] of Object.entries(data)) {
+        if (keys && keys.size > 0 && !keys.has(key)) continue;
+        if (typeof value === 'string') {
+          results.push(value);
+        } else {
+          results.push(...extractJsonText(value, null, depth + 1));
+        }
+      }
+    }
+
+    return results;
+  }
+
+  function collectJsonKeys(data, keyCounts = {}, depth = 0) {
+    if (depth > 10) return keyCounts;
+
+    if (Array.isArray(data)) {
+      for (const item of data) collectJsonKeys(item, keyCounts, depth + 1);
+    } else if (data && typeof data === 'object') {
+      for (const [key, value] of Object.entries(data)) {
+        keyCounts[key] = (keyCounts[key] || 0) + 1;
+        if (typeof value === 'object') collectJsonKeys(value, keyCounts, depth + 1);
+      }
+    }
+
+    return keyCounts;
+  }
+
+  function showJsonKeys(data) {
+    const keys = collectJsonKeys(data);
+    jsonKeysList.innerHTML = '';
+    selectedJsonKeys.clear();
+
+    // Текстовые ключи — типичные для контента
+    const textKeys = ['text', 'content', 'message', 'body', 'title', 'description', 'name',
+      'value', 'label', 'summary', 'comment', 'note', 'paragraph', 'chapter',
+      'question', 'answer', 'reply', 'subject', 'heading', 'caption', 'parts'];
+
+    const sorted = Object.entries(keys).sort((a, b) => b[1] - a[1]);
+
+    for (const [key, count] of sorted) {
+      const tag = document.createElement('span');
+      tag.className = 'json-key-tag';
+      tag.innerHTML = `${key} <span class="count">×${count}</span>`;
+
+      // Автовыбор текстовых ключей
+      if (textKeys.includes(key.toLowerCase())) {
+        tag.classList.add('selected');
+        selectedJsonKeys.add(key);
+      }
+
+      tag.addEventListener('click', () => {
+        tag.classList.toggle('selected');
+        if (selectedJsonKeys.has(key)) {
+          selectedJsonKeys.delete(key);
+        } else {
+          selectedJsonKeys.add(key);
+        }
+      });
+
+      jsonKeysList.appendChild(tag);
+    }
+
+    jsonKeysPanel.classList.add('visible');
+    log(`Найдено ${sorted.length} уникальных JSON ключей`, 'ok');
+  }
+
+  // === FB2 / XML ===
+  function extractFb2Text(xmlText) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xmlText, 'text/xml');
+
+    const parseError = doc.querySelector('parsererror');
+    if (parseError) {
+      log('Ошибка XML парсинга, пробуем как текст', 'warn');
+      return xmlText.replace(/<[^>]+>/g, '\n');
+    }
+
+    const results = [];
+
+    // Заголовки
+    const titleInfo = doc.querySelector('title-info');
+    if (titleInfo) {
+      const bookTitle = titleInfo.querySelector('book-title');
+      if (bookTitle) results.push('=== ' + bookTitle.textContent.trim() + ' ===\n');
+
+      const author = titleInfo.querySelector('author');
+      if (author) {
+        const fn = author.querySelector('first-name')?.textContent || '';
+        const ln = author.querySelector('last-name')?.textContent || '';
+        if (fn || ln) results.push('Автор: ' + (fn + ' ' + ln).trim() + '\n');
+      }
+
+      const annotation = titleInfo.querySelector('annotation');
+      if (annotation) results.push(annotation.textContent.trim() + '\n');
+    }
+
+    // Основное тело
+    const bodies = doc.querySelectorAll('body');
+    bodies.forEach(body => {
+      const sections = body.querySelectorAll('section');
+      if (sections.length) {
+        sections.forEach(section => {
+          const title = section.querySelector('title');
+          if (title) results.push('\n--- ' + title.textContent.trim() + ' ---\n');
+
+          const paragraphs = section.querySelectorAll('p');
+          paragraphs.forEach(p => {
+            const txt = p.textContent.trim();
+            if (txt) results.push(txt);
+          });
+        });
+      } else {
+        const paragraphs = body.querySelectorAll('p');
+        paragraphs.forEach(p => {
+          const txt = p.textContent.trim();
+          if (txt) results.push(txt);
+        });
+      }
+    });
+
+    // Если ничего не нашли — берём весь текст
+    if (results.length === 0) {
+      log('Структура FB2 не распознана, извлекаю весь текст', 'warn');
+      const allP = doc.querySelectorAll('p');
+      allP.forEach(p => {
+        const txt = p.textContent.trim();
+        if (txt) results.push(txt);
+      });
+    }
+
+    if (results.length === 0) {
+      return doc.documentElement.textContent;
+    }
+
+    return results.join('\n\n');
+  }
+
+  // === HTML ===
+  function extractHtmlText(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    // Удаляем скрипты и стили
+    doc.querySelectorAll('script, style, noscript, svg, link, meta').forEach(el => el.remove());
+
+    // Извлекаем текст с сохранением структуры
+    const results = [];
+
+    const title = doc.querySelector('title');
+    if (title && title.textContent.trim()) {
+      results.push('=== ' + title.textContent.trim() + ' ===\n');
+    }
+
+    // Обход дерева
+    function walk(node) {
+      if (node.nodeType === 3) { // текст
+        const txt = node.textContent.trim();
+        if (txt) results.push(txt);
+      } else if (node.nodeType === 1) { // элемент
+        const tag = node.tagName.toLowerCase();
+        const blockTags = ['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr', 'blockquote', 'article', 'section', 'header', 'footer', 'figcaption', 'dd', 'dt'];
+        if (blockTags.includes(tag)) {
+          const txt = node.textContent.trim();
+          if (txt) results.push(txt);
+          return; // не идём глубже
+        }
+        for (const child of node.childNodes) walk(child);
+      }
+    }
+
+    walk(doc.body);
+    return results.join('\n\n');
+  }
+
+  // === Общая очистка текста ===
+  function cleanTextWithOptions(text) {
+    let clean = text;
+
+    if ($('optUrls').checked) {
+      clean = clean.replace(/https?:\/\/[^\s"'<>)}\]]+/g, '');
+    }
+
+    if ($('optEscapes').checked) {
+      clean = clean.replace(/\\n/g, '\n');
+      clean = clean.replace(/\\t/g, ' ');
+      clean = clean.replace(/\\r/g, '');
+      clean = clean.replace(/\\"/g, '"');
+      clean = clean.replace(/\\\\/g, '\\');
+    }
+
+    if ($('optJsonMeta').checked) {
+      // Удаляем технические JSON поля
+      const metaKeys = ['role', 'finishReason', 'model', 'tokenCount', 'token_count',
+        'index', 'logprobs', 'finish_reason', 'id', 'object', 'created',
+        'system_fingerprint', 'usage', 'prompt_tokens', 'completion_tokens',
+        'total_tokens', 'type', 'citations', 'safetyRatings', 'citationMetadata'];
+      metaKeys.forEach(key => {
+        clean = clean.replace(new RegExp(`"${key}"\\s*:\\s*("[^"]*"|\\d+|null|true|false|\\{[^}]*\\}|\\[[^\\]]*\\]),?`, 'g'), '');
+      });
+    }
+
+    if ($('optHtmlTags').checked) {
+      clean = clean.replace(/<[^>]+>/g, ' ');
+      clean = clean.replace(/&[a-zA-Z]+;/g, ' ');
+      clean = clean.replace(/&#\d+;/g, ' ');
+    }
+
+    if ($('optMarkdown').checked) {
+      clean = clean.replace(/\*\*([^*]+)\*\*/g, '$1');
+      clean = clean.replace(/\*([^*]+)\*/g, '$1');
+      clean = clean.replace(/__([^_]+)__/g, '$1');
+      clean = clean.replace(/_([^_]+)_/g, '$1');
+      clean = clean.replace(/#{1,6}\s*/g, '');
+      clean = clean.replace(/```[\s\S]*?```/g, '');
+      clean = clean.replace(/`([^`]+)`/g, '$1');
+      clean = clean.replace(/^\s*[-*+]\s+/gm, '');
+      clean = clean.replace(/^\s*\d+\.\s+/gm, '');
+    }
+
+    if ($('optBrackets').checked) {
+      clean = clean.replace(/[{}[\]]/g, '');
+    }
+
+    if ($('optQuotes').checked) {
+      clean = clean.replace(/["'«»„"]/g, '');
+    }
+
+    if ($('optNumbers').checked) {
+      clean = clean.replace(/\b\d+\.?\d*\b/g, '');
+    }
+
+    if ($('optParagraphs').checked) {
+      // Сохраняем двойные переводы строк
+      clean = clean.replace(/\n{3,}/g, '\n\n');
+      if ($('optExtraSpaces').checked) {
+        clean = clean.split('\n').map(line => line.replace(/[ \t]+/g, ' ').trim()).join('\n');
+      }
+    } else {
+      clean = clean.replace(/[\n\r]+/g, ' ');
+      if ($('optExtraSpaces').checked) {
+        clean = clean.replace(/\s{2,}/g, ' ');
+      }
+    }
+
+    return clean.trim();
+  }
+
+  // === Главная функция ===
+  function processClean() {
+    clearLog();
+    const raw = inputText.value;
+    if (!raw.trim()) { toast('Нечего чистить!', 'warn'); return; }
+
+    let mode = currentMode;
+    if (mode === 'auto') {
+      mode = detectFormat(raw);
+      log(`Автоопределение: формат ${mode.toUpperCase()}`, 'info');
+    }
+
+    let extracted = '';
+
+    switch (mode) {
+      case 'json':
+        try {
+          const data = JSON.parse(raw);
+          parsedJsonData = data;
+          log('JSON успешно распарсен', 'ok');
+
+          if (selectedJsonKeys.size > 0) {
+            const texts = extractJsonText(data, selectedJsonKeys);
+            extracted = texts.join('\n\n');
+            log(`Извлечено ${texts.length} текстовых фрагментов по выбранным ключам`, 'ok');
+          } else {
+            const texts = extractJsonText(data);
+            extracted = texts.join('\n\n');
+            log(`Извлечено ${texts.length} текстовых фрагментов (все ключи)`, 'ok');
+          }
+        } catch (e) {
+          log(`Ошибка JSON: ${e.message}. Пробую как сырой текст.`, 'warn');
+          extracted = raw;
+        }
+        break;
+
+      case 'fb2':
+        extracted = extractFb2Text(raw);
+        log('FB2/XML обработан', 'ok');
+        break;
+
+      case 'html':
+        extracted = extractHtmlText(raw);
+        log('HTML обработан', 'ok');
+        break;
+
+      case 'pdf':
+        extracted = raw; // PDF уже извлечён при загрузке
+        log('PDF текст уже извлечён', 'info');
+        break;
+
+      default:
+        extracted = raw;
+    }
+
+    // Применяем общую очистку
+    const result = cleanTextWithOptions(extracted);
+    outputText.value = result;
+    updateStats();
+
+    const inLen = raw.length;
+    const outLen = result.length;
+    const pct = inLen > 0 ? Math.round((1 - outLen / inLen) * 100) : 0;
+    log(`Готово: ${inLen.toLocaleString()} → ${outLen.toLocaleString()} символов (сжатие ${pct}%)`, 'ok');
+    toast('Мусор уничтожен! ☢️', 'ok');
+  }
+
+  // === Анализ ===
+  function analyzeStructure() {
+    clearLog();
+    const raw = inputText.value;
+    if (!raw.trim()) { toast('Нечего анализировать!', 'warn'); return; }
+
+    let mode = currentMode === 'auto' ? detectFormat(raw) : currentMode;
+    log(`Анализ формата: ${mode.toUpperCase()}`, 'info');
+
+    switch (mode) {
+      case 'json':
+        try {
+          const data = JSON.parse(raw);
+          parsedJsonData = data;
+
+          if (Array.isArray(data)) {
+            log(`Корень: массив из ${data.length} элементов`, 'ok');
+          } else {
+            log(`Корень: объект с ${Object.keys(data).length} ключами`, 'ok');
+          }
+
+          showJsonKeys(data);
+          log('Выберите ключи для извлечения текста, затем нажмите "Уничтожить мусор"', 'info');
+        } catch (e) {
+          log(`Не удалось распарсить JSON: ${e.message}`, 'warn');
+        }
+        break;
+
+      case 'fb2':
+        try {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(raw, 'text/xml');
+          const sections = doc.querySelectorAll('section').length;
+          const paragraphs = doc.querySelectorAll('p').length;
+          const title = doc.querySelector('book-title')?.textContent || 'Не найдено';
+          log(`Название: ${title}`, 'ok');
+          log(`Секций: ${sections}, Параграфов: ${paragraphs}`, 'ok');
+        } catch (e) {
+          log(`Ошибка анализа: ${e.message}`, 'warn');
+        }
+        break;
+
+      case 'html':
+        const tagCount = (raw.match(/<[a-zA-Z][^>]*>/g) || []).length;
+        const scriptCount = (raw.match(/<script/gi) || []).length;
+        const styleCount = (raw.match(/<style/gi) || []).length;
+        log(`HTML тегов: ${tagCount}`, 'ok');
+        log(`Скриптов: ${scriptCount}, Стилей: ${styleCount}`, 'info');
+        break;
+
+      default:
+        const lines = raw.split('\n').length;
+        const words = raw.split(/\s+/).filter(Boolean).length;
+        log(`Строк: ${lines}, Слов: ${words}, Символов: ${raw.length}`, 'ok');
+    }
+  }
+
+  // === Утилиты ===
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  // === Копирование ===
+  async function copyOutput() {
+    const text = outputText.value;
+    if (!text) { toast('Нечего копировать', 'warn'); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Скопировано! 📋', 'ok');
+    } catch {
+      outputText.select();
+      document.execCommand('copy');
+      toast('Скопировано! 📋', 'ok');
+    }
+  }
+
+  // === Скачивание ===
+  function downloadOutput() {
+    const text = outputText.value;
+    if (!text) { toast('Нечего скачивать', 'warn'); return; }
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'clean_text.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Файл скачан 💾', 'ok');
+  }
+
+  // === Очистка всего ===
+  function clearAll() {
+    inputText.value = '';
+    outputText.value = '';
+    loadedFileContent = null;
+    parsedJsonData = null;
+    selectedJsonKeys.clear();
+    fileInput.value = '';
+    $('fileInfo').classList.remove('visible');
+    jsonKeysPanel.classList.remove('visible');
+    clearLog();
+    updateStats();
+    toast('Всё очищено', 'ok');
+  }
+
+  // === Привязка событий ===
+  $('cleanBtn').addEventListener('click', processClean);
+  $('analyzeBtn').addEventListener('click', analyzeStructure);
+  $('clearBtn').addEventListener('click', clearAll);
+  $('copyBtn').addEventListener('click', copyOutput);
+  $('downloadBtn').addEventListener('click', downloadOutput);
+
+  // Инициализация
+  updateStats();
+})();
+</script>
+</body>
+</html>

@@ -22,6 +22,13 @@
 ///
 /// SAFETY: ring-0; caller обязан убедиться, что addr — стандартный порт.
 pub fn probe_port(addr: u16) -> u8 {
+    // MODULE_ABANDON: если порт запрещён — логируем и возвращаем 0xFF (floating)
+    if let crate::port_firewall::PortAccess::Denied(name) = crate::port_firewall::check_port(addr) {
+        crate::serial_println!(
+            "[VALIDATOR] MODULE_ABANDON: probe_port(0x{:04X}) denied — {}", addr, name
+        );
+        return 0xFF;
+    }
     unsafe {
         x86_64::instructions::port::Port::<u8>::new(addr).read()
     }
@@ -67,6 +74,23 @@ pub fn display_ps2_probe() {
             0x0C,
         );
     }
+}
+
+/// Выводит runtime-статус IRQ guard (защита от тяжелых операций из ISR).
+pub fn display_irq_guard_status() {
+    let guard = crate::irq_guard::guard_enabled();
+    let in_irq = crate::irq_guard::is_in_irq();
+    let hits = crate::irq_guard::violation_count();
+
+    crate::locale::print_localized_fmt(
+        0x0B,
+        format_args!(
+            "[IRQGUARD] enabled={} in_irq={} violations={}",
+            guard,
+            in_irq,
+            hits,
+        ),
+    );
 }
 
 // ============================================================

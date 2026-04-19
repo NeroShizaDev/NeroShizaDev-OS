@@ -8,3 +8,9 @@ target = "x86_64-blog_os.json"
 
 [target.'cfg(target_os = "none")']
 runner = "bootimage runner"
+
+[alias]
+# Syntax/type audit only (без style-шума)
+audit-syntax = "check --all-targets --message-format=short"
+# Проверка компиляции тестов без линковки тест-бинаря
+audit-tests = "check --tests --message-format=short"

@@ -53,6 +53,12 @@ pub fn init_idt() {
     IDT.load();
 }
 
+#[inline(always)]
+fn halt_forever() -> ! {
+    x86_64::instructions::interrupts::disable();
+    loop { x86_64::instructions::hlt(); }
+}
+
 unsafe fn notify_end_of_interrupt_raw(interrupt: InterruptIndex) {
     // IRQ с ведомого PIC требуют EOI сначала на slave (0xA0), затем на master (0x20).
     if interrupt.as_u8() >= PIC_2_OFFSET {
@@ -66,7 +72,7 @@ extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) 
     crate::serial_println!("Указатель инструкции: {:#x}", _stack_frame.instruction_pointer.as_u64());
     crate::serial_println!("Указатель стека:      {:#x}", _stack_frame.stack_pointer.as_u64());
     crate::serial_println!("=====================================");
-    crate::trace::record("breakpoint handler entered");
+    crate::trace::record_fatal("breakpoint handler entered");
     unsafe {
         let ip = _stack_frame.instruction_pointer.as_u64();
         crate::locale::render_panic_screen(crate::kernel_messages::KernelEvent::BreakPoint);
@@ -77,8 +83,7 @@ extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) 
             _stack_frame.cpu_flags.bits(),
         );
     }
-    x86_64::instructions::interrupts::disable();
-    loop { x86_64::instructions::hlt(); }
+    halt_forever()
 }
 
 extern "x86-interrupt" fn page_fault_handler(
@@ -87,7 +92,7 @@ extern "x86-interrupt" fn page_fault_handler(
 ) {
     use x86_64::registers::control::Cr2;
     use crate::kernel_messages::KernelEvent;
-    crate::trace::record("page fault handler entered");
+    crate::trace::record_fatal("page fault handler entered");
     let cr2 = Cr2::read_raw();
     // Serial: полный дамп для диагностики
     crate::serial_println!("========== ОШИБКА СТРАНИЦЫ ==========");
@@ -114,15 +119,14 @@ extern "x86-interrupt" fn page_fault_handler(
             _stack_frame.cpu_flags.bits(),
         );
     }
-    x86_64::instructions::interrupts::disable();
-    loop { x86_64::instructions::hlt(); }
+    halt_forever()
 }
 
 extern "x86-interrupt" fn general_protection_fault_handler(
     _stack_frame: InterruptStackFrame,
     error_code: u64,
 ) {
-    crate::trace::record("general protection handler entered");
+    crate::trace::record_fatal("general protection handler entered");
     // Serial: полный дамп для диагностики
     crate::serial_println!("========== НАРУШЕНИЕ ЗАЩИТЫ ==========");
     crate::serial_println!("Код ошибки:           {:#x}", error_code);
@@ -143,14 +147,14 @@ extern "x86-interrupt" fn general_protection_fault_handler(
             _stack_frame.cpu_flags.bits(),
         );
     }
-    x86_64::instructions::interrupts::disable();
-    loop { x86_64::instructions::hlt(); }
+    halt_forever()
 }
 
 extern "x86-interrupt" fn double_fault_handler(
     _stack_frame: InterruptStackFrame,
     _error_code: u64,
 ) -> ! {
+    crate::trace::freeze();
     // Прямая запись в COM1 (0x3F8) без Mutex — безопасно в double fault
     fn serial_byte(b: u8) {
         unsafe {
@@ -179,20 +183,78 @@ extern "x86-interrupt" fn double_fault_handler(
     serial_str("Сегмент:    "); serial_hex(_stack_frame.code_segment.0 as u64); serial_str("\r\n");
     serial_str("Флаги:      "); serial_hex(_stack_frame.cpu_flags.bits()); serial_str("\r\n");
     serial_str("==================================\r\n");
-    // SAFETY: double fault — стек может быть повреждён (мы на IST стеке).
-    // render_panic_screen пишет в VGA напрямую без spin::Mutex (дедлок недопустим).
-    unsafe {
-        crate::locale::render_panic_screen(crate::kernel_messages::KernelEvent::DoubleFault);
-        let ip = _stack_frame.instruction_pointer.as_u64();
-        crate::locale::write_crash_address(ip);
-        crate::locale::write_registers(
-            ip,
-            _stack_frame.stack_pointer.as_u64(),
-            _stack_frame.cpu_flags.bits(),
-        );
+
+    // Дамп последних trace-записей — показывает, какой модуль вызвал сбой
+    fn serial_u8_dec(v: u8) {
+        if v >= 10 {
+            serial_byte(b'0' + v / 10);
+        }
+        serial_byte(b'0' + v % 10);
     }
-    x86_64::instructions::interrupts::disable();
-    loop { x86_64::instructions::hlt(); }
+    serial_str("Последние действия (trace):\r\n");
+    let trace_len = crate::trace::len();
+    if trace_len == 0 {
+        serial_str("  (нет)\r\n");
+    } else {
+        for i in 0..trace_len {
+            if let Some(entry) = crate::trace::get_recent(i) {
+                serial_str("  [");
+                serial_u8_dec(i as u8);
+                serial_str("] ");
+                serial_str(entry);
+                serial_str("\r\n");
+            }
+        }
+    }
+    serial_str("==================================\r\n");
+
+    // Прямая запись в VGA 0xB8000 — NO locale/mutex/println — только raw ptr.
+    // Вызов render_panic_screen() здесь вызывал ВТОРОЙ double fault (spin::Mutex
+    // уже залочен или стек повреждён) → triple fault → перезагрузка → мерцание.
+    unsafe {
+        // Строка 0: красный баннер "ABSOLUTE ABANDON — DOUBLE FAULT — HALTED"
+        let vga = 0xB8000 as *mut u16;
+        let msg: &[u8] = b"ABSOLUTE ABANDON  DOUBLE FAULT  IP=0x";
+        for (i, &b) in msg.iter().enumerate() {
+            core::ptr::write_volatile(vga.add(i), 0x4F00 | b as u16); // white on red
+        }
+        // Печатаем IP рядом с сообщением
+        let mut ip = _stack_frame.instruction_pointer.as_u64();
+        let offset = msg.len();
+        let mut buf = [0u8; 16];
+        for i in (0..16).rev() {
+            let d = (ip & 0xF) as u8;
+            buf[i] = if d < 10 { b'0' + d } else { b'a' + d - 10 };
+            ip >>= 4;
+        }
+        for (i, &b) in buf.iter().enumerate() {
+            core::ptr::write_volatile(vga.add(offset + i), 0x4F00 | b as u16);
+        }
+        // Строка 1: SP
+        let sp_msg: &[u8] = b"SP=0x";
+        for (i, &b) in sp_msg.iter().enumerate() {
+            core::ptr::write_volatile(vga.add(80 + i), 0x4E00 | b as u16); // yellow on red
+        }
+        let mut sp = _stack_frame.stack_pointer.as_u64();
+        let mut buf2 = [0u8; 16];
+        for i in (0..16).rev() {
+            let d = (sp & 0xF) as u8;
+            buf2[i] = if d < 10 { b'0' + d } else { b'a' + d - 10 };
+            sp >>= 4;
+        }
+        for (i, &b) in buf2.iter().enumerate() {
+            core::ptr::write_volatile(vga.add(80 + sp_msg.len() + i), 0x4E00 | b as u16);
+        }
+        // Строка 2: HALTED — не перезагружаемся!
+        let halt_msg: &[u8] = b"SYSTEM HALTED. PRESS RESET TO REBOOT.";
+        for (i, &b) in halt_msg.iter().enumerate() {
+            core::ptr::write_volatile(vga.add(160 + i), 0x4C00 | b as u16); // lt red on red
+        }
+    }
+
+    // Единственный выход — halt навсегда. БЕЗ render_panic_screen!
+    // (render_panic_screen → spin::Mutex → triple fault → reboot loop)
+    halt_forever()
 }
 
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
@@ -202,6 +264,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    let _irq_scope = crate::irq_guard::enter_irq();
     use pc_keyboard::{DecodedKey, HandleControl, Keyboard, ScancodeSet1, layouts};
     use spin::Mutex;
 
@@ -222,6 +285,15 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     // PIC ожидает чтения до отправки следующего прерывания.
     // ISR-контекст: нет конкурентного доступа к порту.
     let scancode: u8 = unsafe { port.read() };
+
+    if crate::ps2::input_owner() == crate::ps2::InputOwner::Apps {
+        crate::ps2::push_scancode_from_irq(scancode);
+        // SAFETY: IRQ1 приходит с master PIC, достаточно прямого EOI.
+        unsafe {
+            notify_end_of_interrupt_raw(InterruptIndex::Keyboard);
+        }
+        return;
+    }
 
     // SAFETY (ALT/CTRL/SHIFT): static mut bool — запись из ISR-контекста.
     // Прерывания отключены пока мы в ISR (CPU отключает IF при входе).
