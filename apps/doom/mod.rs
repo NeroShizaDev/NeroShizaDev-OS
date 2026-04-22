@@ -93,6 +93,10 @@ pub fn run() {
                 vga_graphics::fire_set_mode(vga_graphics::FireMode::FpuNoise);
                 crate::serial_println!("[DOOM] Fire {}", vga_graphics::fire_mode_name(vga_graphics::fire_mode()));
             }
+            if input::take_fpu_toggle() {
+                vga_graphics::fire_toggle_fpu();
+                crate::serial_println!("[DOOM] FPU {}", if vga_graphics::fire_fpu_enabled() { "ON" } else { "OFF" });
+            }
 
             if input::is_fire() {
                 for x in 0..vga_graphics::SCREEN_W {

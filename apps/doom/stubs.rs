@@ -107,6 +107,13 @@ pub fn reset_heap() {
     HEAP.0.lock().reset();
 }
 
+/// Метрики кучи — возвращают 0 пока Doom не инициализирован.
+pub fn heap_used_bytes()       -> usize { 0 }
+pub fn heap_total_bytes()      -> usize { 0 }
+pub fn heap_peak_used_bytes()  -> usize { 0 }
+pub fn heap_oom_count()        -> usize { 0 }
+pub fn heap_last_oom_request() -> usize { 0 }
+
 // ============================================================
 // C FFI — malloc / free / calloc
 // Нужны если doom-rs вызывает libc напрямую (через extern "C")

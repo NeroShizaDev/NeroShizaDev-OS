@@ -82,6 +82,10 @@ pub static mut SCROLL_OFFSET: usize = 0;
 pub static mut HIST_NAV: isize = -1;
 pub static mut CMD_TOTAL: u32 = 0;
 pub static mut CMD_STATS: [u32; 9] = [0; 9];
+static mut SERIAL_MON_TICK: u32 = 0;
+static mut SERIAL_MON_EVERY: u32 = 600;
+static mut LAST_IRQ_VIOLATIONS: u64 = 0;
+static mut LAST_OOM_COUNT: usize = 0;
 // Статистика и режим прокрутки оставлены как есть, если используются вне SHELL
 
 const DEFERRED_NONE: u8 = 0;
@@ -401,7 +405,50 @@ fn print_exit_phrase() {
     locale::print_localized_line(phrase, 0x0E);
 }
 
+fn emit_shell_serial_monitor() {
+    unsafe {
+        SERIAL_MON_TICK = SERIAL_MON_TICK.wrapping_add(1);
+        if SERIAL_MON_TICK < SERIAL_MON_EVERY {
+            return;
+        }
+        SERIAL_MON_TICK = 0;
+
+        let act = apps::activity::debug_stats();
+        let app = apps::activity::app_kind_name(act.current);
+        let trace_depth = crate::trace::len();
+        let irq_hits = crate::irq_guard::violation_count();
+
+        // Doom heap-метрики (если Doom уже инициализировал свою кучу).
+        let heap_used = doom::stubs::heap_used_bytes();
+        let heap_total = doom::stubs::heap_total_bytes();
+        let heap_peak = doom::stubs::heap_peak_used_bytes();
+        let heap_oom = doom::stubs::heap_oom_count();
+        let last_oom_req = doom::stubs::heap_last_oom_request();
+        let cmd_total = core::ptr::read_volatile(&raw const CMD_TOTAL);
+        let history_count = core::ptr::read_volatile(&raw const SHELL.history_count);
+
+        let irq_delta = irq_hits.saturating_sub(LAST_IRQ_VIOLATIONS);
+        LAST_IRQ_VIOLATIONS = irq_hits;
+        let oom_delta = heap_oom.saturating_sub(LAST_OOM_COUNT);
+        LAST_OOM_COUNT = heap_oom;
+
+        let hidden_err = heap_oom > 0 || irq_delta > 0;
+
+        crate::serial_println!("[SYS][INFO] +-------------------------------------------------------------+");
+        crate::serial_println!("[SYS][INFO] | App {:<10} d={}/{} up={} sw={} p/r/pop={}/{}/{} |", app, act.depth, act.max_depth, act.updates, act.switches, act.pushes, act.replaces, act.pops);
+        crate::serial_println!("[SYS][INFO] | Shell cmd_total={} hist={} trace={} irq_hits={} (+{}) |", cmd_total, history_count, trace_depth, irq_hits, irq_delta);
+        crate::serial_println!("[SYS][INFO] | Heap used={}/{} peak={} oom={} (+{}) last_req={} |", heap_used, heap_total, heap_peak, heap_oom, oom_delta, last_oom_req);
+        crate::serial_println!("[SYS][INFO] | HiddenErrFlag {} |", if hidden_err { 1 } else { 0 });
+        crate::serial_println!("[SYS][INFO] +-------------------------------------------------------------+");
+
+        // При тревоге сводку делаем чаще.
+        SERIAL_MON_EVERY = if hidden_err { 180 } else { 600 };
+    }
+}
+
 pub fn process_deferred_actions() {
+    emit_shell_serial_monitor();
+
     if crate::irq_guard::take_first_hit_alert() {
         show_irq_guard_first_hit_alert();
     }

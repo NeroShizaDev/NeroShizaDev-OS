@@ -301,6 +301,48 @@ impl Drop for InputGuard {
 
 // ── Public utility ────────────────────────────────────────────────────────────
 
+pub struct ActivityDebugStats {
+    pub current:   AppKind,
+    pub depth:     usize,
+    pub max_depth: usize,
+    pub updates:   u32,
+    pub switches:  u32,
+    pub pushes:    u32,
+    pub replaces:  u32,
+    pub pops:      u32,
+}
+
+pub fn debug_stats() -> ActivityDebugStats {
+    ActivityDebugStats {
+        current:   AppKind::Launcher,
+        depth:     0,
+        max_depth: 0,
+        updates:   0,
+        switches:  0,
+        pushes:    0,
+        replaces:  0,
+        pops:      0,
+    }
+}
+
+pub fn app_kind_name(k: AppKind) -> &'static str {
+    match k {
+        AppKind::Launcher => "Launcher",
+        AppKind::Games    => "Games",
+        AppKind::Doom     => "Doom",
+        AppKind::Jackal   => "Jackal",
+        AppKind::Menger   => "Menger",
+        AppKind::Voodoo   => "Voodoo",
+        AppKind::Chronos  => "Chronos",
+        AppKind::Rtc      => "Rtc",
+        AppKind::Rng      => "Rng",
+        AppKind::Beeper   => "Beeper",
+        AppKind::Fpu      => "Fpu",
+        AppKind::Locale   => "Locale",
+        AppKind::Nhs      => "Nhs",
+    }
+}
+
 pub fn wait_key() {
     unsafe {
         loop {

@@ -31,8 +31,9 @@ static mut KEY_USE:     bool  = false;
 static mut KEY_RUN:     bool  = false;
 static mut KEY_MODE_1:  bool  = false;
 static mut KEY_MODE_2:  bool  = false;
-static mut KEY_MODE_3:  bool  = false;
-static mut KEY_MODE_4:  bool  = false;
+static mut KEY_MODE_3:     bool  = false;
+static mut KEY_MODE_4:     bool  = false;
+static mut KEY_FPU_TOGGLE: bool  = false; // \ (0x2B) — переключение FPU
 
 /// Включить/выключить режим Doom (глобальный флаг)
 pub fn set_active(active: bool) {
@@ -70,6 +71,7 @@ pub fn poll() -> bool {
                 0x1C => KEY_FIRE    = pressed,
                 0x39 => KEY_USE     = pressed,
                 0x2A | 0x36 => KEY_RUN = pressed,
+                0x2B => { if pressed { KEY_FPU_TOGGLE = true; } } // \
                 _ => {}
             }
         }
@@ -98,8 +100,9 @@ pub fn reset() {
         KEY_RUN     = false;
         KEY_MODE_1  = false;
         KEY_MODE_2  = false;
-        KEY_MODE_3  = false;
-        KEY_MODE_4  = false;
+        KEY_MODE_3     = false;
+        KEY_MODE_4     = false;
+        KEY_FPU_TOGGLE = false;
     }
 }
 
@@ -146,6 +149,15 @@ pub fn take_mode_4() -> bool {
     unsafe {
         let pressed = KEY_MODE_4;
         KEY_MODE_4 = false;
+        pressed
+    }
+}
+
+/// \ — переключение FPU-физики (накапливающий флаг, снимается один раз)
+pub fn take_fpu_toggle() -> bool {
+    unsafe {
+        let pressed = KEY_FPU_TOGGLE;
+        KEY_FPU_TOGGLE = false;
         pressed
     }
 }
