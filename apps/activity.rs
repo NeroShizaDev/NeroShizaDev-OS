@@ -30,35 +30,9 @@ pub enum ActivityIntent {
     Replace(AppKind),
 }
 
-// ── Activity flags (bitmask, stored in stack slot) ────────────────────────────
-
-pub struct ActivityFlags(pub u8);
-
-impl ActivityFlags {
-    /// Default: activity is saved in back-stack.
-    pub const NORMAL:       ActivityFlags = ActivityFlags(0x00);
-    /// Like Android FLAG_ACTIVITY_NO_HISTORY: Pop after first Push on top.
-    pub const NO_HISTORY:   ActivityFlags = ActivityFlags(0x01);
-    /// Like SINGLE_TOP: if already on top, don't push duplicate.
-    pub const SINGLE_TOP:   ActivityFlags = ActivityFlags(0x02);
-    /// Clear entire stack before pushing (like FLAG_ACTIVITY_CLEAR_TOP).
-    pub const CLEAR_TOP:    ActivityFlags = ActivityFlags(0x04);
-
-    pub fn has(&self, f: &ActivityFlags) -> bool { self.0 & f.0 != 0 }
-}
-
-// ── Intent extras — tiny data passed between activities ───────────────────────
-
-/// Fixed 32-byte payload, no heap. Like Android Intent extras but honest.
-#[derive(Clone, Copy)]
-pub struct IntentExtras {
-    pub tag:  [u8; 4],      // 4-char type tag, e.g. b"GAME"
-    pub data: [u8; 28],     // opaque payload
-}
-
-impl IntentExtras {
-    pub const EMPTY: Self = Self { tag: *b"NONE", data: [0u8; 28] };
-}
+// ── Activity flags — reserved for future use (not yet assigned on push) ──────
+// ActivityFlags and IntentExtras removed: no implementation existed.
+// AppKind::Shell removed: Shell exit is now handled via Pop from Launcher.
 
 // ── App kind — every activity is one of these ────────────────────────────────
 
@@ -77,16 +51,14 @@ pub enum AppKind {
     Beeper   = 9,
     Fpu      = 10,
     Locale   = 11,
-    /// Back to the interrupt-driven shell (hlt_loop).
-    Shell    = 12,
+    /// NHS installed app — run NeroShizaScript from slot LAUNCH_NHS_SLOT.
+    Nhs      = 12,
 }
 
 // ── Stack slot ────────────────────────────────────────────────────────────────
 
 struct Slot {
-    kind:   AppKind,
-    flags:  ActivityFlags,
-    extras: IntentExtras,
+    kind: AppKind,
 }
 
 // ── ActivityStack — static, no heap, depth 16 ────────────────────────────────
@@ -111,9 +83,9 @@ impl ActivityStack {
         }
     }
 
-    fn push(&mut self, kind: AppKind, flags: ActivityFlags, extras: IntentExtras) {
+    fn push(&mut self, kind: AppKind) {
         if self.len >= MAX_DEPTH { return; }
-        self.slots[self.len] = Some(Slot { kind, flags, extras });
+        self.slots[self.len] = Some(Slot { kind });
         self.len += 1;
     }
 
@@ -134,15 +106,6 @@ impl ActivityStack {
     fn is_empty(&self) -> bool { self.len == 0 }
 
     fn depth(&self) -> usize { self.len }
-
-    /// CLEAR_TOP: drain down to (not including) the bottom launcher.
-    fn clear_all_but_bottom(&mut self) {
-        while self.len > 1 {
-            if let Some(slot) = self.pop() {
-                dispatch_lifecycle(slot.kind, Lifecycle::Destroy);
-            }
-        }
-    }
 }
 
 // ── Lifecycle dispatch ────────────────────────────────────────────────────────
@@ -156,8 +119,8 @@ fn dispatch_lifecycle(kind: AppKind, ev: Lifecycle) {
         (AppKind::Launcher, Lifecycle::Pause)   => crate::apps::launcher::on_pause(),
         (AppKind::Launcher, Lifecycle::Destroy) => {}
 
-        (AppKind::Games,  Lifecycle::Start)   => crate::apps::games::on_start(),
-        (AppKind::Games,  Lifecycle::Resume)  => crate::apps::games::on_resume(),
+        (AppKind::Games,  Lifecycle::Start)   => {}
+        (AppKind::Games,  Lifecycle::Resume)  => {}
         (AppKind::Games,  Lifecycle::Pause)   => {}
         (AppKind::Games,  Lifecycle::Destroy) => {}
 
@@ -211,18 +174,10 @@ fn dispatch_lifecycle(kind: AppKind, ev: Lifecycle) {
         (AppKind::Locale,  Lifecycle::Pause)   => crate::apps::locale_switcher::on_pause(),
         (AppKind::Locale,  Lifecycle::Destroy) => {}
 
-        // Shell: stateless from lifecycle perspective.
-        // on_start re-draws the shell prompt so the screen looks right.
-        (AppKind::Shell, Lifecycle::Start) => {
-            crate::vga_buffer::clear_screen();
-            crate::print!("> ");
-        }
-        (AppKind::Shell, Lifecycle::Resume)  => {
-            crate::vga_buffer::clear_screen();
-            crate::print!("> ");
-        }
-        (AppKind::Shell, Lifecycle::Pause)   => {}
-        (AppKind::Shell, Lifecycle::Destroy) => {}
+        (AppKind::Nhs, Lifecycle::Start)   => {}
+        (AppKind::Nhs, Lifecycle::Resume)  => {}
+        (AppKind::Nhs, Lifecycle::Pause)   => {}
+        (AppKind::Nhs, Lifecycle::Destroy) => {}
     }
 }
 
@@ -234,15 +189,44 @@ fn dispatch_update(kind: AppKind, depth: usize) -> ActivityIntent {
         AppKind::Doom     => { crate::doom::run();                                   ActivityIntent::Pop }
         AppKind::Jackal   => { crate::apps::jackal::shell::run_demo();               ActivityIntent::Pop }
         AppKind::Menger   => { crate::menger::run_demo();                            ActivityIntent::Pop }
-        AppKind::Voodoo   => { crate::voodoo_math::demo_cellular_automaton();        ActivityIntent::Pop }
-        AppKind::Chronos  => { crate::chronos::display_triple_time();               ActivityIntent::Pop }
-        AppKind::Rtc      => { crate::rtc::display_status();                         ActivityIntent::Pop }
-        AppKind::Rng      => { crate::rng::demo();                                   ActivityIntent::Pop }
-        AppKind::Beeper   => { crate::beeper::demo_hex_scale();                      ActivityIntent::Pop }
+        AppKind::Voodoo   => {
+            crate::vga_buffer::clear_screen();
+            crate::voodoo_math::demo_cellular_automaton();
+            wait_key();
+            ActivityIntent::Pop
+        }
+        AppKind::Chronos  => {
+            crate::vga_buffer::clear_screen();
+            crate::chronos::display_triple_time();
+            wait_key();
+            ActivityIntent::Pop
+        }
+        AppKind::Rtc      => {
+            crate::vga_buffer::clear_screen();
+            crate::rtc::display_status();
+            wait_key();
+            ActivityIntent::Pop
+        }
+        AppKind::Rng      => {
+            crate::vga_buffer::clear_screen();
+            crate::rng::demo();
+            wait_key();
+            ActivityIntent::Pop
+        }
+        AppKind::Beeper   => {
+            crate::vga_buffer::clear_screen();
+            crate::beeper::demo_hex_scale();
+            wait_key();
+            ActivityIntent::Pop
+        }
         AppKind::Fpu      => { crate::fpu::demo();                                   ActivityIntent::Pop }
         AppKind::Locale   => crate::apps::locale_switcher::update(depth),
-        // Shell: pop immediately — control returns to hlt_loop which drives the shell via ISR.
-        AppKind::Shell    => ActivityIntent::Pop,
+        // NHS: run the NeroShizaScript stored in LAUNCH_NHS_SLOT, then pop.
+        AppKind::Nhs      => {
+            let slot = unsafe { crate::apps::launcher::LAUNCH_NHS_SLOT as usize };
+            crate::apps::installer::runtime::run_slot(slot);
+            ActivityIntent::Pop
+        }
     }
 }
 
@@ -252,7 +236,7 @@ pub fn run_activity_manager() {
     let _guard = InputGuard::new();
 
     let mut stack = ActivityStack::new();
-    stack.push(AppKind::Launcher, ActivityFlags::NORMAL, IntentExtras::EMPTY);
+    stack.push(AppKind::Launcher);
     dispatch_lifecycle(AppKind::Launcher, Lifecycle::Start);
 
     loop {
@@ -275,21 +259,15 @@ pub fn run_activity_manager() {
             }
 
             ActivityIntent::Push(next) => {
-                // SINGLE_TOP: if next == top, do nothing
-                if next == kind {
-                    if let Some(s) = stack.top() {
-                        if s.flags.has(&ActivityFlags::SINGLE_TOP) { continue; }
-                    }
-                }
                 dispatch_lifecycle(kind, Lifecycle::Pause);
-                stack.push(next, ActivityFlags::NORMAL, IntentExtras::EMPTY);
+                stack.push(next);
                 dispatch_lifecycle(next, Lifecycle::Start);
             }
 
             ActivityIntent::Replace(next) => {
                 dispatch_lifecycle(kind, Lifecycle::Destroy);
                 stack.pop();
-                stack.push(next, ActivityFlags::NORMAL, IntentExtras::EMPTY);
+                stack.push(next);
                 dispatch_lifecycle(next, Lifecycle::Start);
             }
         }

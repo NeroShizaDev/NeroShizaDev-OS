@@ -10,6 +10,9 @@
 use crate::apps::jackal::encoder::{JKL_MAGIC, JKL_HEADER_SIZE};
 use super::archive::ARCH_MAGIC;
 
+// Большой scratch-архив для валидации JKLA в BSS (без мегабайт на стеке).
+static mut VALIDATE_SCRATCH: super::archive::Archive = super::archive::Archive::new();
+
 /// Результат валидации
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidateResult {
@@ -83,8 +86,14 @@ fn validate_jkl(data: &[u8]) -> ValidateResult {
 }
 
 fn validate_jkla(data: &[u8]) -> ValidateResult {
-    match super::archive::unpack(data) {
-        Ok(_) => ValidateResult::JklaArchive,
+    let res = unsafe {
+        super::archive::unpack_into(
+            data,
+            &mut *core::ptr::addr_of_mut!(VALIDATE_SCRATCH),
+        )
+    };
+    match res {
+        Ok(()) => ValidateResult::JklaArchive,
         Err("unknown algorithm") => ValidateResult::UnknownAlgorithm,
         Err("bad magic") | Err("too short") => ValidateResult::BadMagic,
         Err(_) => ValidateResult::SizeMismatch,

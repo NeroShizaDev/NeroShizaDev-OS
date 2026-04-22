@@ -49,12 +49,21 @@ pub fn init(wad_data: &'static [u8]) {
 pub fn run() {
     crate::serial_println!("[DOOM] Запуск");
     unsafe {
+        // Сохраняем ВСЕ 256 слотов шрифта plane 2 перед Mode 13h.
+        // chain-4 в Mode 13h перезапишет plane 2 данными огня — без этого
+        // box-drawing символы (0xBA..0xCD и т.п.) будут испорчены после выхода.
+        vga_graphics::save_font_plane();
         crate::serial_println!("[DOOM] Переключение в Mode 13h...");
         vga_graphics::set_mode_13h();
         crate::serial_println!("[DOOM] Палитра огня...");
         vga_graphics::set_fire_palette();
         vga_graphics::clear_fb(0);
+        vga_graphics::fire_set_mode(vga_graphics::FireMode::Classic);
         vga_graphics::fire_init();
+        crate::serial_println!(
+            "[DOOM] Fire {}",
+            vga_graphics::fire_mode_name(vga_graphics::fire_mode())
+        );
         watchdog::init();
         input::set_active(true);
         crate::serial_println!("[DOOM] Главный цикл запущен");
@@ -67,6 +76,23 @@ pub fn run() {
 
         loop {
             if input::poll() { break; }
+
+            if input::take_mode_1() {
+                vga_graphics::fire_set_mode(vga_graphics::FireMode::Classic);
+                crate::serial_println!("[DOOM] Fire {}", vga_graphics::fire_mode_name(vga_graphics::fire_mode()));
+            }
+            if input::take_mode_2() {
+                vga_graphics::fire_set_mode(vga_graphics::FireMode::Dual);
+                crate::serial_println!("[DOOM] Fire {}", vga_graphics::fire_mode_name(vga_graphics::fire_mode()));
+            }
+            if input::take_mode_3() {
+                vga_graphics::fire_set_mode(vga_graphics::FireMode::Inferno);
+                crate::serial_println!("[DOOM] Fire {}", vga_graphics::fire_mode_name(vga_graphics::fire_mode()));
+            }
+            if input::take_mode_4() {
+                vga_graphics::fire_set_mode(vga_graphics::FireMode::FpuNoise);
+                crate::serial_println!("[DOOM] Fire {}", vga_graphics::fire_mode_name(vga_graphics::fire_mode()));
+            }
 
             if input::is_fire() {
                 for x in 0..vga_graphics::SCREEN_W {
@@ -95,10 +121,12 @@ pub fn run() {
 pub fn on_destroy() {
     crate::serial_println!("[DOOM] on_destroy: восстановление текстового режима (4 шага)");
     unsafe {
-        // Шаг 1-4: регистры + DAC-палитра + шрифт Plane 2 + очистка 0xB8000
+        // Шаг 1-4: регистры + DAC-палитра + ASCII 0-127 + очистка 0xB8000
         crate::vga_hw::restore_text_mode();
-        // Кириллица (слоты 128-191) — ASCII грузится в restore_text_mode()
-        crate::vga_unicode::load_static_glyphs();
+        // Восстанавливаем ВСЕ 256 слотов шрифта из бэкапа:
+        // ASCII 0-127 (наш кастомный), кириллица 128-191, box-drawing 192-255.
+        // Без этого символы ╠═╚╝║ (>191) остаются испорченными огнём doom.
+        vga_graphics::restore_font_plane();
         // Восстанавливаем locale badge (флаг локали в правом углу)
         crate::locale::draw_locale_badge();
     }

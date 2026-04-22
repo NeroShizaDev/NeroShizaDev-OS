@@ -319,6 +319,85 @@ static GIGA_DICT: &[(IntentVector, Intent)] = &[
 
     // "оракул" [о=0x043E р=0x0440 а=0x0430 к=0x043A у=0x0443 л=0x043B]
     (word_to_vector(&[0x043E, 0x0440, 0x0430, 0x043A, 0x0443, 0x043B]), Intent::Voodoo),
+
+    // ==================== MIRROR ALIASES (RTL typing) ====================
+    // Латинские команды задом наперёд — для набора в AR-режиме справа налево.
+    // Формат: зеркало_команды → тот же Intent что у оригинала.
+
+    // "tixe" ← exit
+    (word_to_vector(&[0x74, 0x69, 0x78, 0x65]), Intent::Exit),
+    // "tiuq" ← quit
+    (word_to_vector(&[0x74, 0x69, 0x75, 0x71]), Intent::Exit),
+
+    // "pleh" ← help
+    (word_to_vector(&[0x70, 0x6C, 0x65, 0x68]), Intent::Help),
+
+    // "raelc" ← clear  ("slc" ← cls уже есть в словаре)
+    (word_to_vector(&[0x72, 0x61, 0x65, 0x6C, 0x63]), Intent::Clear),
+
+    // "sutats" ← status
+    (word_to_vector(&[0x73, 0x75, 0x74, 0x61, 0x74, 0x73]), Intent::Status),
+
+    // "toober" ← reboot
+    (word_to_vector(&[0x74, 0x6F, 0x6F, 0x62, 0x65, 0x72]), Intent::Reboot),
+
+    // "elacol" ← locale
+    (word_to_vector(&[0x65, 0x6C, 0x61, 0x63, 0x6F, 0x6C]), Intent::LocaleCycle),
+    // "gnal" ← lang
+    (word_to_vector(&[0x67, 0x6E, 0x61, 0x6C]), Intent::LocaleCycle),
+
+    // "ur" ← ru
+    (word_to_vector(&[0x75, 0x72]), Intent::LocaleRu),
+
+    // "ne" ← en
+    (word_to_vector(&[0x6E, 0x65]), Intent::LocaleEn),
+    // "gne" ← eng
+    (word_to_vector(&[0x67, 0x6E, 0x65]), Intent::LocaleEn),
+
+    // "ra" ← ar
+    (word_to_vector(&[0x72, 0x61]), Intent::LocaleAr),
+    // "bara" ← arab
+    (word_to_vector(&[0x62, 0x61, 0x72, 0x61]), Intent::LocaleAr),
+
+    // "erol" ← lore
+    (word_to_vector(&[0x65, 0x72, 0x6F, 0x6C]), Intent::ModeLore),
+
+    // "hcet" ← tech
+    (word_to_vector(&[0x68, 0x63, 0x65, 0x74]), Intent::ModeTech),
+    // "lacinhcet" ← technical
+    (word_to_vector(&[0x6C, 0x61, 0x63, 0x69, 0x6E, 0x68, 0x63, 0x65, 0x74]), Intent::ModeTech),
+
+    // "sapp" ← apps
+    (word_to_vector(&[0x73, 0x61, 0x70, 0x70]), Intent::Apps),
+    // "unem" ← menu
+    (word_to_vector(&[0x75, 0x6E, 0x65, 0x6D]), Intent::Apps),
+    // "rehcnual" ← launcher
+    (word_to_vector(&[0x72, 0x65, 0x68, 0x63, 0x6E, 0x75, 0x61, 0x6C]), Intent::Apps),
+
+    // "imaohw" ← whoami
+    (word_to_vector(&[0x69, 0x6D, 0x61, 0x6F, 0x68, 0x77]), Intent::WhoAmI),
+
+    // "tsefinam" ← manifest
+    (word_to_vector(&[0x74, 0x73, 0x65, 0x66, 0x69, 0x6E, 0x61, 0x6D]), Intent::Manifest),
+    // "oren" ← nero
+    (word_to_vector(&[0x6F, 0x72, 0x65, 0x6E]), Intent::Manifest),
+
+    // "yportne" ← entropy
+    (word_to_vector(&[0x79, 0x70, 0x6F, 0x72, 0x74, 0x6E, 0x65]), Intent::Entropy),
+    // "nonnahs" ← shannon
+    (word_to_vector(&[0x6E, 0x6F, 0x6E, 0x6E, 0x61, 0x68, 0x73]), Intent::Entropy),
+
+    // "gnr" ← rng
+    (word_to_vector(&[0x67, 0x6E, 0x72]), Intent::Rng),
+    // "dnar" ← rand
+    (word_to_vector(&[0x64, 0x6E, 0x61, 0x72]), Intent::Rng),
+    // "modnar" ← random
+    (word_to_vector(&[0x6D, 0x6F, 0x64, 0x6E, 0x61, 0x72]), Intent::Rng),
+
+    // "oodoov" ← voodoo
+    (word_to_vector(&[0x6F, 0x6F, 0x64, 0x6F, 0x6F, 0x76]), Intent::Voodoo),
+    // "elcaro" ← oracle
+    (word_to_vector(&[0x65, 0x6C, 0x63, 0x61, 0x72, 0x6F]), Intent::Voodoo),
 ];
 
 // ============================================================

@@ -13,6 +13,7 @@
 //   0x1C — Enter (выстрел)
 //   0x39 — Space (использовать)
 //   0x2A, 0x36 — Shift (бег)
+//   0x02/0x03/0x04/0x05 — 1/2/3/4 (режимы огня)
 //   0x80+ — release (scancode | 0x80)
 // ============================================================
 
@@ -28,6 +29,10 @@ static mut KEY_RIGHT:   bool  = false;
 static mut KEY_FIRE:    bool  = false;
 static mut KEY_USE:     bool  = false;
 static mut KEY_RUN:     bool  = false;
+static mut KEY_MODE_1:  bool  = false;
+static mut KEY_MODE_2:  bool  = false;
+static mut KEY_MODE_3:  bool  = false;
+static mut KEY_MODE_4:  bool  = false;
 
 /// Включить/выключить режим Doom (глобальный флаг)
 pub fn set_active(active: bool) {
@@ -54,6 +59,10 @@ pub fn poll() -> bool {
             let code    = sc & 0x7F;
             match code {
                 0x01 => { if pressed { KEY_ESC = true; } }
+                0x02 => { if pressed { KEY_MODE_1 = true; } }
+                0x03 => { if pressed { KEY_MODE_2 = true; } }
+                0x04 => { if pressed { KEY_MODE_3 = true; } }
+                0x05 => { if pressed { KEY_MODE_4 = true; } }
                 0x11 => KEY_FORWARD = pressed,
                 0x1F => KEY_BACK    = pressed,
                 0x1E => KEY_LEFT    = pressed,
@@ -87,6 +96,10 @@ pub fn reset() {
         KEY_FIRE    = false;
         KEY_USE     = false;
         KEY_RUN     = false;
+        KEY_MODE_1  = false;
+        KEY_MODE_2  = false;
+        KEY_MODE_3  = false;
+        KEY_MODE_4  = false;
     }
 }
 
@@ -104,4 +117,36 @@ pub fn is_right()   -> bool { unsafe { KEY_RIGHT   } }
 pub fn is_fire()    -> bool { unsafe { KEY_FIRE    } }
 pub fn is_use()     -> bool { unsafe { KEY_USE     } }
 pub fn is_run()     -> bool { unsafe { KEY_RUN     } }
+
+pub fn take_mode_1() -> bool {
+    unsafe {
+        let pressed = KEY_MODE_1;
+        KEY_MODE_1 = false;
+        pressed
+    }
+}
+
+pub fn take_mode_2() -> bool {
+    unsafe {
+        let pressed = KEY_MODE_2;
+        KEY_MODE_2 = false;
+        pressed
+    }
+}
+
+pub fn take_mode_3() -> bool {
+    unsafe {
+        let pressed = KEY_MODE_3;
+        KEY_MODE_3 = false;
+        pressed
+    }
+}
+
+pub fn take_mode_4() -> bool {
+    unsafe {
+        let pressed = KEY_MODE_4;
+        KEY_MODE_4 = false;
+        pressed
+    }
+}
 

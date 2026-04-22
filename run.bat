@@ -9,10 +9,16 @@ set "TMP_TARGET=%TMP_BUILDER%\target"
 set "PROJECT_ROOT=%CD%"
 set "BUILD_ONLY=0"
 set "DEBUG_GDB=0"
+set "SERIAL_BRIDGE=0"
+set "SERIAL_PORT=4321"
 
 if /I "%~1"=="--build-only" set "BUILD_ONLY=1"
+if /I "%~1"=="--serial-bridge" set "SERIAL_BRIDGE=1"
+if /I "%~2"=="--serial-bridge" set "SERIAL_BRIDGE=1"
 if /I "%~1"=="--debug" set "DEBUG_GDB=1"
 if /I "%~2"=="--debug" set "DEBUG_GDB=1"
+if /I "%~1"=="--serial-log" set "SERIAL_BRIDGE=0"
+if /I "%~2"=="--serial-log" set "SERIAL_BRIDGE=0"
 
 echo [*] NeroShizaDev-OS v0.3 - Sborka...
 cargo build --bin blog_os
@@ -86,10 +92,23 @@ if "%DEBUG_GDB%"=="1" (
     set "QEMU_EXTRA=-s -S"
     echo [*] GDB DEBUG MODE: QEMU zhdyot podklyucheniya na localhost:1234
     echo     gdb target\x86_64-blog_os\debug\blog_os
-    echo     target remote :1234
     echo.
 )
 
-"%QEMU%" -cpu max -drive format=raw,file=%IMAGE% -no-reboot -no-shutdown -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0 -serial file:serial.log %QEMU_EXTRA%
+set "SERIAL_LOG_PATH=%PROJECT_ROOT%\serial.log"
+set "QEMU_SERIAL=-serial file:%SERIAL_LOG_PATH%"
+if "%SERIAL_BRIDGE%"=="1" (
+    set "QEMU_SERIAL=-serial tcp:127.0.0.1:%SERIAL_PORT%,server,nowait"
+    echo [*] SERIAL OTA MODE: COM1 bridge na localhost:%SERIAL_PORT%
+    echo     Shell: install serial
+    echo     Host:  python tools/send_nhs.py apps/installer/demo.nhs --tcp localhost:%SERIAL_PORT%
+    echo.
+)
+if "%SERIAL_BRIDGE%"=="0" (
+    > "%SERIAL_LOG_PATH%" type nul
+    echo [*] SERIAL LOG MODE: %SERIAL_LOG_PATH%
+)
+
+"%QEMU%" -cpu max -drive format=raw,file=%IMAGE% -no-reboot -no-shutdown -audiodev sdl,id=snd0 -machine pcspk-audiodev=snd0 %QEMU_SERIAL% %QEMU_EXTRA%
 
 pause

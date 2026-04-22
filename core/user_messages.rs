@@ -18,11 +18,15 @@ pub const LOGO_TAGLINE: &str = "        #[no_mangle]";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiText {
+    SystemCheckHeader,
     Phase2CpuOk,
     Phase3MemoryOk,
+    Phase4RngOn,
+    Phase4RngOff,
     Phase5SpeakerOk,
     Phase5SpeakerFail,
     Phase6FontLocaleOk,
+    Phase7ShellReady,
     BootBannerTitle,
     BootBannerUnicode,
     SystemReadyHint,
@@ -80,12 +84,21 @@ pub enum UiText {
 
 pub fn text(locale: Locale, key: UiText) -> &'static str {
     match (locale, key) {
+        (Locale::RuRu, UiText::SystemCheckHeader) => "=== ПРОВЕРКА СИСТЕМЫ ===",
+        (Locale::EnUs, UiText::SystemCheckHeader) => "=== SYSTEM CHECK ===",
+        (Locale::ArEg, UiText::SystemCheckHeader) => "=== فحص النظام ===",
         (Locale::RuRu, UiText::Phase2CpuOk) => "[Фаза 2] CPU: GDT / IDT / PICS / FPU - ОК",
         (Locale::EnUs, UiText::Phase2CpuOk) => "[Phase 2] CPU: GDT / IDT / PICS / FPU - OK",
         (Locale::ArEg, UiText::Phase2CpuOk) => "[المرحلة 2] CPU: GDT / IDT / PICS / FPU - OK",
         (Locale::RuRu, UiText::Phase3MemoryOk) => "[Фаза 3] Память: загружена загрузчиком - ОК",
         (Locale::EnUs, UiText::Phase3MemoryOk) => "[Phase 3] Memory: bootloader map loaded - OK",
         (Locale::ArEg, UiText::Phase3MemoryOk) => "[المرحلة 3] الذاكرة: خريطة محمل الإقلاع جاهزة - OK",
+        (Locale::RuRu, UiText::Phase4RngOn)  => "[Фаза 4] RNG: RDRAND включён",
+        (Locale::EnUs, UiText::Phase4RngOn)  => "[Phase 4] RNG: RDRAND on",
+        (Locale::ArEg, UiText::Phase4RngOn)  => "[المرحلة 4] RNG: RDRAND مفعل",
+        (Locale::RuRu, UiText::Phase4RngOff) => "[Фаза 4] RNG: RDRAND отсутствует",
+        (Locale::EnUs, UiText::Phase4RngOff) => "[Phase 4] RNG: RDRAND off",
+        (Locale::ArEg, UiText::Phase4RngOff) => "[المرحلة 4] RNG: RDRAND غير مدعوم",
         (Locale::RuRu, UiText::Phase5SpeakerOk) => "[Фаза 5] Speaker: ОК - подаем сигнал",
         (Locale::EnUs, UiText::Phase5SpeakerOk) => "[Phase 5] Speaker: OK - sending signal",
         (Locale::ArEg, UiText::Phase5SpeakerOk) => "[المرحلة 5] Speaker: OK - ارسال اشارة",
@@ -104,6 +117,9 @@ pub fn text(locale: Locale, key: UiText) -> &'static str {
         (Locale::RuRu, UiText::SystemReadyHint) => "Система готова. Введи 'помощь' или 'help'",
         (Locale::EnUs, UiText::SystemReadyHint) => "System ready. Type 'help'",
         (Locale::ArEg, UiText::SystemReadyHint) => "النظام جاهز. اكتب 'help'",
+        (Locale::RuRu, UiText::Phase7ShellReady) => "[Фаза 7] Shell: готов — введи 'помощь' или 'help'",
+        (Locale::EnUs, UiText::Phase7ShellReady) => "[Phase 7] Shell: ready — type 'help'",
+        (Locale::ArEg, UiText::Phase7ShellReady) => "[المرحلة 7] Shell: جاهز — اكتب 'help'",
         (Locale::RuRu, UiText::MengerDone) => "NeroShizaDev: Губка Менгера завершена.",
         (Locale::EnUs, UiText::MengerDone) => "NeroShizaDev: Menger sponge complete.",
         (Locale::ArEg, UiText::MengerDone) => "NeroShizaDev: اكتمل عرض Menger.",
@@ -215,9 +231,9 @@ pub fn text(locale: Locale, key: UiText) -> &'static str {
         (Locale::RuRu, UiText::ValidatorErrFmt) => "[ERR] {} - возврат в shell",
         (Locale::EnUs, UiText::ValidatorErrFmt) => "[ERR] {} - returning to shell",
         (Locale::ArEg, UiText::ValidatorErrFmt) => "[ERR] {} - عودة الى shell",
-        (Locale::RuRu, UiText::ValidatorFatalFmt) => "[FATAL] {} - перезагрузка...",
-        (Locale::EnUs, UiText::ValidatorFatalFmt) => "[FATAL] {} - rebooting...",
-        (Locale::ArEg, UiText::ValidatorFatalFmt) => "[FATAL] {} - اعادة تشغيل...",
+        (Locale::RuRu, UiText::ValidatorFatalFmt) => "[FATAL] {} - система остановлена, см. serial.log",
+        (Locale::EnUs, UiText::ValidatorFatalFmt) => "[FATAL] {} - system halted, see serial.log",
+        (Locale::ArEg, UiText::ValidatorFatalFmt) => "[FATAL] {} - تم ايقاف النظام، راجع serial.log",
         (Locale::RuRu, UiText::RtcNoChip) => "Время: недоступно (чип RTC мертв)",
         (Locale::EnUs, UiText::RtcNoChip) => "Time: unavailable (RTC chip is dead)",
         (Locale::ArEg, UiText::RtcNoChip) => "الوقت: غير متاح (شريحة RTC ميتة)",
@@ -294,8 +310,19 @@ pub fn print_fpu_entropy(label: &'static str, whole: u64, frac: u64) {
 
 pub fn print_validator_cmos(status_a: u8, bat: &str, rtc: &str) {
     match crate::locale::get_locale() {
-        Locale::RuRu => crate::locale::print_localized_fmt(0x0E, format_args!("[CMOS] Чип: ОК (StatA=0x{:02X}) | Батарейка: {} | RTC: {}", status_a, bat, rtc)),
-        Locale::EnUs | Locale::ArEg => crate::locale::print_localized_fmt(0x0E, format_args!("[CMOS] Chip: OK (StatA=0x{:02X}) | Battery: {} | RTC: {}", status_a, bat, rtc)),
+        Locale::RuRu => {
+            // alloc a stack string via fmt then pass to print_boot_status
+            crate::locale::print_boot_status_fmt(format_args!(
+                "[CMOS] Чип: ОК (StatA=0x{:02X}) | Батарейка: {} | RTC: {}",
+                status_a, bat, rtc
+            ));
+        }
+        Locale::EnUs | Locale::ArEg => {
+            crate::locale::print_boot_status_fmt(format_args!(
+                "[CMOS] Chip: OK (StatA=0x{:02X}) | Battery: {} | RTC: {}",
+                status_a, bat, rtc
+            ));
+        }
     }
 }
 pub fn print_validator_warn(msg: &str) {

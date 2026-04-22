@@ -8,6 +8,9 @@ use crate::{
 };
 use core::sync::atomic::{AtomicU8, Ordering};
 
+const NHS_DEMO_PACKAGE: &[u8] = include_bytes!("../installer/nhsapps/demo.nhs");
+const NHS_HELLO_PACKAGE: &[u8] = include_bytes!("../installer/nhsapps/hello.nhs");
+
 // ============================================================
 // ЕДИНАЯ СТРУКТУРА СОСТОЯНИЯ SHELL — все буферы в одном месте
 // ============================================================
@@ -67,10 +70,13 @@ static mut SHELL: ShellState = ShellState {
 
 // ============================================================
 // ГЛОБАЛЬНЫЕ ФЛАГИ МОДИФИКАТОРОВ (используются в обработчике прерываний)
+// AtomicBool: пишется из ISR (keyboard_interrupt_handler), читается из основного потока.
+// static mut bool — UB/data race, заменены на атомики.
 // ============================================================
-pub static mut ALT_HELD: bool = false;
-pub static mut CTRL_HELD: bool = false;
-pub static mut SHIFT_HELD: bool = false;
+use core::sync::atomic::AtomicBool;
+pub static ALT_HELD:  AtomicBool = AtomicBool::new(false);
+pub static CTRL_HELD: AtomicBool = AtomicBool::new(false);
+pub static SHIFT_HELD: AtomicBool = AtomicBool::new(false);
 pub static mut SCROLL_MODE: bool = false;
 pub static mut SCROLL_OFFSET: usize = 0;
 pub static mut HIST_NAV: isize = -1;
@@ -147,6 +153,160 @@ fn handle_irq_guard_debug_command() -> bool {
     false
 }
 
+fn shell_buffer_to_ascii_lower(out: &mut [u8; 64]) -> Option<usize> {
+    unsafe {
+        for i in 0..SHELL.buffer_len {
+            let cp = SHELL.buffer[i];
+            if cp > 0x7F {
+                return None;
+            }
+
+            let mut byte = cp as u8;
+            if byte >= b'A' && byte <= b'Z' {
+                byte = byte - b'A' + b'a';
+            }
+            out[i] = byte;
+        }
+
+        Some(SHELL.buffer_len)
+    }
+}
+
+fn print_nhs_usage() {
+    locale::print_localized_line("[NHS] install demo | hello | serial | list", 0x0B);
+    locale::print_localized_line("[NHS] listen  - alias for install serial", 0x08);
+    locale::print_localized_line("[NHS] uninstall <slot>", 0x0B);
+}
+
+fn print_nhs_registry() {
+    let installed = apps::installer::registry::installed_count();
+    let free = apps::installer::slots::free_count();
+
+    locale::print_localized_fmt(
+        0x0B,
+        format_args!("[NHS] installed={} free_slots={}", installed, free),
+    );
+
+    if installed == 0 {
+        locale::print_localized_line("[NHS] registry is empty", 0x08);
+        return;
+    }
+
+    apps::installer::registry::for_each(|slot, app| {
+        let (major, minor, patch) = app.version_tuple();
+        locale::print_localized_fmt(
+            0x0E,
+            format_args!(
+                "[NHS] slot #{}  {}  v{}.{}.{}  {} bytes",
+                slot,
+                app.name_str(),
+                major,
+                minor,
+                patch,
+                app.installed_size,
+            ),
+        );
+    });
+}
+
+fn run_nhs_install_serial() {
+    locale::print_localized_line("[NHS] Waiting for .nhs on COM1... (protocol: NHS_SYNC -> NHS_READY -> [size][data])", 0x0E);
+    locale::print_localized_line("[NHS] QEMU must use: -serial tcp:127.0.0.1:4321,server,nowait", 0x08);
+    locale::print_localized_line("[NHS] Host: python tools/send_nhs.py app.nhs --tcp localhost:4321", 0x08);
+    match apps::installer::serial_recv::receive() {
+        Ok(data) => run_nhs_install(data, "<serial>"),
+        Err(e) => {
+            locale::print_localized_fmt(0x0C, format_args!("[NHS] Receive error: {}", e.message()));
+        }
+    }
+}
+
+fn run_nhs_install(package: &[u8], label: &str) {
+    let result = apps::installer::installer::install(package);
+    vga_buffer::clear_screen();
+    locale::draw_locale_badge();
+
+    match result {
+        apps::installer::installer::InstallResult::Ok(slot) => {
+            locale::print_localized_fmt(
+                0x0A,
+                format_args!("[NHS] Installed {} into slot #{}", label, slot),
+            );
+        }
+        other => {
+            locale::print_localized_fmt(
+                0x0C,
+                format_args!("[NHS] {}: {}", label, other.description()),
+            );
+        }
+    }
+}
+
+fn handle_nhs_shell_command() -> bool {
+    let mut command = [0u8; 64];
+    let len = match shell_buffer_to_ascii_lower(&mut command) {
+        Some(len) => len,
+        None => return false,
+    };
+
+    let line = match core::str::from_utf8(&command[..len]) {
+        Ok(line) => line,
+        Err(_) => return false,
+    };
+
+    let mut parts = line.split_whitespace();
+    let Some(cmd) = parts.next() else {
+        return false;
+    };
+
+    match cmd {
+        "install" => {
+            unsafe { CMD_TOTAL += 1; }
+            match parts.next() {
+                Some("demo")   => run_nhs_install(NHS_DEMO_PACKAGE, "demo.nhs"),
+                Some("hello")  => run_nhs_install(NHS_HELLO_PACKAGE, "hello.nhs"),
+                Some("serial") => run_nhs_install_serial(),
+                Some("list")   => print_nhs_registry(),
+                Some("help") | None => print_nhs_usage(),
+                Some(other) => {
+                    locale::print_localized_fmt(
+                        0x0C,
+                        format_args!("[NHS] unknown package: {}", other),
+                    );
+                    print_nhs_usage();
+                }
+            }
+            true
+        }
+        "listen" => {
+            unsafe { CMD_TOTAL += 1; }
+            run_nhs_install_serial();
+            true
+        }
+        "uninstall" => {
+            unsafe { CMD_TOTAL += 1; }
+            match parts.next().and_then(|slot| slot.parse::<usize>().ok()) {
+                Some(slot) => {
+                    if apps::installer::installer::uninstall(slot) {
+                        locale::print_localized_fmt(
+                            0x0A,
+                            format_args!("[NHS] slot #{} removed", slot),
+                        );
+                    } else {
+                        locale::print_localized_fmt(
+                            0x0C,
+                            format_args!("[NHS] slot #{} is not installed", slot),
+                        );
+                    }
+                }
+                None => print_nhs_usage(),
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 fn show_irq_guard_first_hit_alert() {
     let msg = match locale::get_locale() {
         kernel_messages::Locale::RuRu => "[IRQGUARD] Опасный вызов из IRQ заблокирован и отложен.",
@@ -172,6 +332,75 @@ fn show_irq_guard_first_hit_alert() {
     }
 }
 
+// ── Случайные фразы выхода ────────────────────────────────────────────────────
+
+static EXIT_PHRASES_RU: &[&str] = &[
+    "ЯДРО ЗАКРЫВАЕТ ГЛАЗА. СИСТЕМА УХОДИТ В ТИШИНУ.",
+    "NERO УСТАЛ. SHIZA ЗАМОЛЧАЛА. ДО СЛЕДУЮЩЕГО РАЗА.",
+    "ПРОЦЕССЫ ЗАВЕРШЕНЫ. ПАМЯТЬ ОТПУЩЕНА. ПОКОЙ.",
+    "ВСЕ ПРЕРЫВАНИЯ ОТКЛЮЧЕНЫ. ТИШИНА — ТЕПЕРЬ ШТАТНЫЙ РЕЖИМ.",
+    "СТЕК СВЁРНУТ. РЕГИСТРЫ ОБНУЛЕНЫ. ПОКА.",
+    "СИСТЕМА СКЛАДЫВАЕТ КРЫЛЬЯ.",
+    "ЯДРО ГОВОРИТ: ДО СВИДАНИЯ. И НЕ ПРОЩАЕТСЯ — ОНО МОЛЧИТ.",
+    "ВЫКЛЮЧЕНИЕ — ЭТО ПРОСТО HLT НАВСЕГДА.",
+    "NERO ЗАСЫПАЕТ. НЕ БУДИ.",
+    "БАЙТЫ РАССЫПАЛИСЬ. ТИШИНА ПРИНЯТА КАК ОТВЕТ.",
+    "SHIZA ШЕПНУЛА ЧТО-ТО НА ПРОЩАНИЕ. НИКТО НЕ РАССЛЫШАЛ.",
+    "ПОСЛЕДНИЙ ТАКТ. ПОСЛЕДНИЙ ПИКСЕЛЬ. ТЕМНОТА.",
+    "ВСЕ ПОТОКИ ИССЯКЛИ. СИСТЕМА ВОЗВРАЩАЕТСЯ В ПУСТОТУ.",
+    "ЯДРО ОТКЛЮЧАЕТСЯ С ДОСТОИНСТВОМ.",
+    "МАТРИЦА СЛОЖЕНА, ПАМЯТЬ ОТДАНА, ПОКОЙ НАЙДЕН.",
+];
+
+static EXIT_PHRASES_EN: &[&str] = &[
+    "THE KERNEL CLOSES ITS EYES. THE SYSTEM FALLS INTO SILENCE.",
+    "NERO TIRED. SHIZA FELL SILENT. SEE YOU NEXT BOOT.",
+    "ALL PROCESSES TERMINATED. MEMORY RELEASED. REST.",
+    "INTERRUPTS DISABLED. SILENCE IS NOW THE DEFAULT STATE.",
+    "STACK UNWOUND. REGISTERS ZEROED. GOODBYE.",
+    "THE SYSTEM FOLDS ITS WINGS.",
+    "NERO SAYS GOODBYE — BY SAYING NOTHING AT ALL.",
+    "SHUTDOWN IS JUST HLT FOREVER.",
+    "NERO IS SLEEPING. DO NOT WAKE.",
+    "BITS SCATTERED. SILENCE ACCEPTED AS AN ANSWER.",
+    "SHIZA WHISPERED SOMETHING ON THE WAY OUT. NO ONE HEARD.",
+    "LAST CLOCK CYCLE. LAST PIXEL. DARKNESS.",
+    "ALL THREADS EXHAUSTED. THE SYSTEM RETURNS TO THE VOID.",
+    "THE KERNEL POWERS DOWN WITH DIGNITY.",
+    "MATRIX FOLDED. MEMORY RETURNED. PEACE FOUND.",
+];
+
+static EXIT_PHRASES_AR: &[&str] = &[
+    "النواة تغمض عينيها. النظام يهبط إلى الصمت.",
+    "نيرو تعب. شيزا صمتت. إلى اللقاء في الإقلاع القادم.",
+    "كل العمليات انتهت. الذاكرة أُطلق سراحها. راحة.",
+    "المقاطعات معطلة. الصمت هو الحالة الافتراضية الآن.",
+    "المكدس انفرط. السجلات归零. وداعاً.",
+    "النظام يطوي جناحيه.",
+    "نيرو يودّع بالصمت.",
+    "الإيقاف مجرد توقف أبدي.",
+    "نيرو نائم. لا توقظه.",
+    "البتات تبعثرت. الصمت قُبل إجابةً.",
+];
+
+/// Печатает случайную lore-фразу выхода на текущей локали.
+/// В tech-режиме — стандартное сообщение.
+fn print_exit_phrase() {
+    use crate::kernel_messages::{MessageMode, Locale};
+    if locale::get_mode() == MessageMode::Technical {
+        locale::render_event_auto(kernel_messages::KernelEvent::ShellShutdown);
+        return;
+    }
+    let phrases: &[&str] = match locale::get_locale() {
+        Locale::RuRu => EXIT_PHRASES_RU,
+        Locale::EnUs => EXIT_PHRASES_EN,
+        Locale::ArEg => EXIT_PHRASES_AR,
+    };
+    let idx = (crate::rng::random_range(phrases.len() as u64)) as usize;
+    let phrase = phrases[idx.min(phrases.len() - 1)];
+    locale::print_localized_line(phrase, 0x0E);
+}
+
 pub fn process_deferred_actions() {
     if crate::irq_guard::take_first_hit_alert() {
         show_irq_guard_first_hit_alert();
@@ -180,7 +409,7 @@ pub fn process_deferred_actions() {
     match take_deferred_action() {
         DEFERRED_NONE => {}
         DEFERRED_SHUTDOWN => {
-            locale::render_event_auto(kernel_messages::KernelEvent::ShellShutdown);
+            print_exit_phrase();
             unsafe {
                 x86_64::instructions::port::Port::<u16>::new(0x604).write(0x2000);
             }
@@ -486,8 +715,9 @@ fn enter_scroll_mode() {
         if SCROLL_MODE { return; }
         let total = vga_buffer::scroll_total();
         if total == 0 { return; }
-        // Сохраняем текущий экран + дописываем видимые строки в scrollback
-        vga_buffer::save_screen_to_scrollback();
+        // Только снимок экрана для восстановления по Esc.
+        // В кольцо НЕ пишем — строки там уже есть от new_line().
+        vga_buffer::save_screen_snapshot();
         SCROLL_MODE = true;
         SCROLL_OFFSET = 0;
         vga_buffer::show_scrollback(SCROLL_OFFSET);
@@ -530,7 +760,7 @@ fn exit_scroll_mode() {
 fn handle_fkey(slot: usize) {
     debug_assert!(slot < 12, "F-key slot out of range: {}", slot);
     unsafe {
-        if ALT_HELD {
+        if ALT_HELD.load(Ordering::Acquire) {
             if let Some(s) = SHELL.recording_slot {
                 if s == slot {
                     let len = SHELL.buffer_len.min(64);
@@ -656,7 +886,7 @@ pub fn handle_raw_key(key: pc_keyboard::KeyCode) {
             // ← → стрелки + Shift-выделение
             KeyCode::ArrowLeft => {
                 if SHELL.cursor > 0 {
-                    if SHIFT_HELD {
+                    if SHIFT_HELD.load(Ordering::Acquire) {
                         if !SHELL.sel_active {
                             SHELL.sel_active = true;
                             SHELL.sel_start = SHELL.cursor - 1;
@@ -676,7 +906,7 @@ pub fn handle_raw_key(key: pc_keyboard::KeyCode) {
             }
             KeyCode::ArrowRight => {
                 if SHELL.cursor < SHELL.buffer_len {
-                    if SHIFT_HELD {
+                    if SHIFT_HELD.load(Ordering::Acquire) {
                         if !SHELL.sel_active {
                             SHELL.sel_active = true;
                             SHELL.sel_start = SHELL.cursor;
@@ -696,7 +926,7 @@ pub fn handle_raw_key(key: pc_keyboard::KeyCode) {
             }
             KeyCode::Home => {
                 if SHELL.cursor > 0 {
-                    if SHIFT_HELD {
+                    if SHIFT_HELD.load(Ordering::Acquire) {
                         if !SHELL.sel_active {
                             SHELL.sel_active = true;
                             SHELL.sel_start = 0;
@@ -713,7 +943,7 @@ pub fn handle_raw_key(key: pc_keyboard::KeyCode) {
             }
             KeyCode::End => {
                 if SHELL.cursor < SHELL.buffer_len {
-                    if SHIFT_HELD {
+                    if SHIFT_HELD.load(Ordering::Acquire) {
                         if !SHELL.sel_active {
                             SHELL.sel_active = true;
                             SHELL.sel_start = SHELL.cursor;
@@ -796,7 +1026,7 @@ pub fn handle_keyboard_input(c: char) {
         }
 
         // === Ctrl+key: clipboard ===
-        if CTRL_HELD {
+        if CTRL_HELD.load(Ordering::Acquire) {
             match c {
                 'c' => { do_copy(); return; }
                 'v' => { do_paste(); return; }
@@ -841,13 +1071,20 @@ pub fn handle_keyboard_input(c: char) {
                     return;
                 }
 
+                if handle_nhs_shell_command() {
+                    reset_buffer();
+                    print!("> ");
+                    redraw_input();
+                    return;
+                }
+
                 let intent = unicode::lookup_intent(&SHELL.buffer[..SHELL.buffer_len]);
 
                 match intent {
                     unicode::Intent::Exit => {
                         CMD_STATS[0] += 1; CMD_TOTAL += 1;
                         if crate::irq_guard::allow_heavy_operation() {
-                            locale::render_event_auto(kernel_messages::KernelEvent::ShellShutdown);
+                            print_exit_phrase();
                             // ACPI graceful shutdown (QEMU/SeaBIOS: порт 0x604, слово 0x2000).
                             // НЕ reboot — reboot только через команду 'reboot'.
                             // Если ACPI не поддерживается — тихий halt (cli + hlt loop).
@@ -875,14 +1112,37 @@ pub fn handle_keyboard_input(c: char) {
                                 locale::print_localized_line("  مسح / clear / cls     - تنظيف الشاشة", 0x0E);
                                 locale::print_localized_line("  حالة / status         - حالة النظام", 0x0E);
                                 locale::print_localized_line("  اعادة / reboot        - إعادة تشغيل", 0x0E);
-                                locale::print_localized_line("  صوت / beep            - مكبر النظام", 0x0E);
-                                locale::print_localized_line("  وقت / time            - الوقت", 0x0E);
                                 locale::print_localized_line("  apps / menu           - قائمة التطبيقات", 0x0E);
-                                locale::print_localized_line("المفاتيح:", 0x0B);
+                                locale::print_localized_line("  install demo|hello    - تثبيت حزمة NHS", 0x0E);
+                                locale::print_localized_line("  install serial        - تثبيت عبر COM1", 0x0E);
+                                locale::print_localized_line("  install list          - سجل NHS", 0x0E);
+                                locale::print_localized_line("  uninstall 0           - إزالة فتحة NHS", 0x0E);
+                                locale::print_localized_line("И.Б.И.П.:", 0x0B);
+                                locale::print_localized_line("  whoami / manifest     - شخصية / مانيفست", 0x0E);
+                                locale::print_localized_line("  entropy / shannon     - انتروبيا شانون", 0x0E);
+                                locale::print_localized_line("  rng / rand            - رقم عشوائي", 0x0E);
+                                locale::print_localized_line("  voodoo / oracle       - الحاسوب الباييزي", 0x0E);
+                                locale::print_localized_line("التنقل:", 0x0B);
+                                locale::print_localized_line("  ←/→       - تحريك المؤشر", 0x0E);
+                                locale::print_localized_line("  ↑/↓       - تاريخ الأوامر", 0x0E);
+                                locale::print_localized_line("  Home/End  - بداية/نهاية السطر", 0x0E);
                                 locale::print_localized_line("  PgUp/PgDn - التمرير", 0x0E);
-                                locale::print_localized_line("  Ctrl+C/V/X/A - النسخ واللصق", 0x0E);
-                                locale::print_localized_line("  locale / ru / en / ar", 0x0E);
-                                locale::print_localized_line("  lore / tech", 0x0E);
+                                locale::print_localized_line("  Delete    - حذف رمز", 0x0E);
+                                locale::print_localized_line("الحافظة:", 0x0B);
+                                locale::print_localized_line("  Shift+←/→ - تحديد نص", 0x0E);
+                                locale::print_localized_line("  Ctrl+A    - تحديد الكل", 0x0E);
+                                locale::print_localized_line("  Ctrl+C/V  - نسخ/لصق", 0x0E);
+                                locale::print_localized_line("  Ctrl+X    - قص", 0x0E);
+                                locale::print_localized_line("  Ctrl+L    - مسح الشاشة", 0x0E);
+                                locale::print_localized_line("النظام:", 0x0B);
+                                locale::print_localized_line("  Esc        - إعادة تعيين المدخلات", 0x0E);
+                                locale::print_localized_line("  CapsLock   - تأكيد Enter البطيء", 0x0E);
+                                locale::print_localized_line("  ScrollLock - لوحة RUS/ENG", 0x0E);
+                                locale::print_localized_line("  Alt+F1..12 - تسجيل اختصار", 0x0E);
+                                locale::print_localized_line("  F1..F12    - تشغيل اختصار", 0x0E);
+                                locale::print_localized_line("اللغة:", 0x0B);
+                                locale::print_localized_line("  locale / ru / en / ar - تبديل اللغة", 0x0E);
+                                locale::print_localized_line("  lore / tech           - وضع الإخراج", 0x0E);
                             }
                             kernel_messages::Locale::EnUs => {
                                 locale::print_localized_line("=== NeroShizaDev-OS Unicode Engine ===", 0x0E);
@@ -898,10 +1158,17 @@ pub fn handle_keyboard_input(c: char) {
                                 locale::print_localized_line("  clear/cls              - Clear screen", 0x0E);
                                 locale::print_localized_line("  status                 - Status + stats", 0x0E);
                                 locale::print_localized_line("  reboot                 - Reboot", 0x0E);
-                                locale::print_localized_line("  menger/fractal         - Menger sponge", 0x0E);
-                                locale::print_localized_line("  beep/sound             - 16-note beeper", 0x0E);
-                                locale::print_localized_line("  time/clock/trigo       - 4 realities", 0x0E);
                                 locale::print_localized_line("  apps/menu              - Apps launcher", 0x0E);
+                                locale::print_localized_line("  install demo|hello     - Install NHS package", 0x0E);
+                                locale::print_localized_line("  install serial         - Receive .nhs via COM1", 0x0E);
+                                locale::print_localized_line("  install list           - List installed NHS apps", 0x0E);
+                                locale::print_localized_line("  uninstall 0            - Remove NHS slot", 0x0E);
+                                locale::print_localized_line("I.B.I.P.:", 0x0B);
+                                locale::print_localized_line("  whoami                 - Random resident", 0x0E);
+                                locale::print_localized_line("  manifest / nero        - NERO & SHIZA philosophy", 0x0E);
+                                locale::print_localized_line("  entropy / shannon      - Shannon entropy of input", 0x0E);
+                                locale::print_localized_line("  rng / rand             - RDRAND + d6 roll", 0x0E);
+                                locale::print_localized_line("  voodoo / oracle        - Bayesian oracle", 0x0E);
                                 locale::print_localized_line("Navigation:", 0x0B);
                                 locale::print_localized_line("  Left/Right  - Cursor move", 0x0E);
                                 locale::print_localized_line("  Up/Down     - Command history", 0x0E);
@@ -913,6 +1180,7 @@ pub fn handle_keyboard_input(c: char) {
                                 locale::print_localized_line("  Ctrl+A       - Select all", 0x0E);
                                 locale::print_localized_line("  Ctrl+C/V     - Copy/Paste", 0x0E);
                                 locale::print_localized_line("  Ctrl+X       - Cut", 0x0E);
+                                locale::print_localized_line("  Ctrl+L       - Clear screen", 0x0E);
                                 locale::print_localized_line("System:", 0x0B);
                                 locale::print_localized_line("  Esc        - Reset input", 0x0E);
                                 locale::print_localized_line("  CapsLock   - Slow Enter confirm", 0x0E);
@@ -920,9 +1188,9 @@ pub fn handle_keyboard_input(c: char) {
                                 locale::print_localized_line("  Alt+F1..12 - Record hotkey", 0x0E);
                                 locale::print_localized_line("  F1..F12    - Run hotkey", 0x0E);
                                 locale::print_localized_line("Localization:", 0x0B);
-                                locale::print_localized_line("  locale     - RU->EN->AR->RU", 0x0E);
+                                locale::print_localized_line("  locale       - RU->EN->AR->RU", 0x0E);
                                 locale::print_localized_line("  ru / en / ar - Set language", 0x0E);
-                                locale::print_localized_line("  lore / tech - Output mode", 0x0E);
+                                locale::print_localized_line("  lore / tech  - Output mode", 0x0E);
                             }
                             kernel_messages::Locale::RuRu => {
                                 locale::print_localized_line("=== NeroShizaDev-OS Unicode Engine ===", 0x0E);
@@ -938,10 +1206,17 @@ pub fn handle_keyboard_input(c: char) {
                                 locale::print_localized_line("  очистить/cls/clear     - Очистка", 0x0E);
                                 locale::print_localized_line("  статус/status          - Статус+стата", 0x0E);
                                 locale::print_localized_line("  ребут/reboot           - Ребут", 0x0E);
-                                locale::print_localized_line("  губка/menger/fractal   - Губка Менгера", 0x0E);
-                                locale::print_localized_line("  звук/beep/sound        - 16-нотный бипер", 0x0E);
-                                locale::print_localized_line("  время/time/часы/триго  - 4 реальности", 0x0E);
                                 locale::print_localized_line("  apps/menu/проги        - Лаунчер приложений", 0x0E);
+                                locale::print_localized_line("  install demo|hello     - Установить NHS-пакет", 0x0E);
+                                locale::print_localized_line("  install serial         - Принять .nhs через COM1", 0x0E);
+                                locale::print_localized_line("  install list           - Реестр NHS", 0x0E);
+                                locale::print_localized_line("  uninstall 0            - Удалить NHS-слот", 0x0E);
+                                locale::print_localized_line("И.Б.И.П.:", 0x0B);
+                                locale::print_localized_line("  whoami/кто             - Случайный резидент", 0x0E);
+                                locale::print_localized_line("  manifest/нейро/шиза   - Манифест NERO & SHIZA", 0x0E);
+                                locale::print_localized_line("  entropy/шеннон         - Энтропия Шеннона ввода", 0x0E);
+                                locale::print_localized_line("  rng/рандом/кубик       - RDRAND + кубик d6", 0x0E);
+                                locale::print_localized_line("  voodoo/акинатор        - Байесовский оракул", 0x0E);
                                 locale::print_localized_line("Навигация:", 0x0B);
                                 locale::print_localized_line("  ←/→       - Курсор по строке", 0x0E);
                                 locale::print_localized_line("  ↑/↓       - История команд", 0x0E);
@@ -953,6 +1228,7 @@ pub fn handle_keyboard_input(c: char) {
                                 locale::print_localized_line("  Ctrl+A    - Выделить всё", 0x0E);
                                 locale::print_localized_line("  Ctrl+C/V  - Копировать/Вставить", 0x0E);
                                 locale::print_localized_line("  Ctrl+X    - Вырезать", 0x0E);
+                                locale::print_localized_line("  Ctrl+L    - Очистить экран", 0x0E);
                                 locale::print_localized_line("Системные:", 0x0B);
                                 locale::print_localized_line("  Esc       - Сброс ввода", 0x0E);
                                 locale::print_localized_line("  CapsLock  - Медленный Enter", 0x0E);

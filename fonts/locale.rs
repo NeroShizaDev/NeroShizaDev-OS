@@ -202,11 +202,139 @@ pub fn print_localized_fmt(color: u8, args: fmt::Arguments) {
     });
 }
 
+/// Вариант print_boot_status для format_args! — буферизует через LocalizedBuffer, затем вызывает print_boot_status.
+pub fn print_boot_status_fmt(args: fmt::Arguments) {
+    let mut buf = LocalizedBuffer::new();
+    let _ = buf.write_fmt(args);
+    // Восстанавливаем строку из codepoints (ASCII-совместимые codepoints → bytes)
+    // Для boot-сообщений все символы <= 0x7FF, поэтому конвертация надёжна.
+    let mut tmp = [0u8; 512];
+    let mut tmp_len = 0usize;
+    for &cp in buf.as_slice() {
+        if tmp_len + 4 >= tmp.len() { break; }
+        if let Some(ch) = char::from_u32(cp) {
+            let n = ch.encode_utf8(&mut tmp[tmp_len..]).len();
+            tmp_len += n;
+        }
+    }
+    if let Ok(s) = core::str::from_utf8(&tmp[..tmp_len]) {
+        print_boot_status(s);
+    }
+}
+
+/// остаток опять жёлтым. Все вхождения "ОК"/"OK" красятся зелёным.
+/// Только LTR (для Arabic fallback — вся строка жёлтая).
+pub fn print_boot_status(msg: &str) {
+    crate::println!("");
+
+    unsafe {
+        let spec = locale_spec(get_locale());
+
+        if matches!(spec.direction, TextDirection::Rtl) {
+            let mut buf = LocalizedBuffer::new();
+            let _ = buf.write_str(msg);
+            write_codepoints_rtl_direct(buf.as_slice(), 24, 79, 0x0E, spec.numerals);
+        } else {
+            // Разбиваем строку на сегменты: чередуем yellow и green для каждого ОК/OK
+            let mut col: usize = 0;
+            let mut remaining = msg;
+            loop {
+                // Ищем ближайшее "ОК" или "OK"
+                let found_ok  = remaining.find("ОК").map(|i| (i, 4usize));  // ОК = 4 байта UTF-8
+                let found_lat = remaining.find("OK").map(|i| (i, 2usize));
+                let found = match (found_ok, found_lat) {
+                    (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
+                    (Some(a), None)    => Some(a),
+                    (None,    Some(b)) => Some(b),
+                    (None,    None)    => None,
+                };
+                match found {
+                    Some((idx, ok_len)) => {
+                        // Жёлтый префикс
+                        if idx > 0 {
+                            let mut pre = LocalizedBuffer::new();
+                            let _ = pre.write_str(&remaining[..idx]);
+                            write_codepoints_ltr_direct(pre.as_slice(), 24, col.min(79), 0x0E, spec.numerals);
+                            col += pre.as_slice().len();
+                        }
+                        // Зелёный ОК
+                        let mut ok = LocalizedBuffer::new();
+                        let _ = ok.write_str(&remaining[idx..idx + ok_len]);
+                        write_codepoints_ltr_direct(ok.as_slice(), 24, col.min(79), 0x0A, spec.numerals);
+                        col += ok.as_slice().len();
+                        remaining = &remaining[idx + ok_len..];
+                    }
+                    None => {
+                        // Оставшийся суффикс жёлтый
+                        if !remaining.is_empty() {
+                            let mut suf = LocalizedBuffer::new();
+                            let _ = suf.write_str(remaining);
+                            write_codepoints_ltr_direct(suf.as_slice(), 24, col.min(79), 0x0E, spec.numerals);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        crate::vga_buffer::WRITER.lock().column_position = 0;
+    });
+}
+
 // ============================================================
 // PRINT RTL LINE — вывод строки справа налево в нижнюю строку VGA.
 // Использовать только при захваченном без_прерываний контексте
 // или вне критических секций.
 // ============================================================
+
+/// Печатает строку состояния Фазы 6 с зелёными статусными словами.
+/// RU: "загружена" и "активна" — зелёные.
+/// EN: "loaded" и "active" — зелёные.
+/// AR: "محمل" и "مفعلة" — жёлтые (RTL fallback).
+pub fn print_phase6_ok() {
+    crate::println!("");
+    unsafe {
+        let spec = locale_spec(get_locale());
+        let segments: &[(&str, u8)] = match get_locale() {
+            crate::kernel_messages::Locale::RuRu => &[
+                ("[Фаза 6] Шрифт: кириллица ",  0x0E),
+                ("загружена",                    0x0A),
+                (" | Локаль: ",                  0x0E),
+                ("активна",                      0x0A),
+            ],
+            crate::kernel_messages::Locale::EnUs => &[
+                ("[Phase 6] Font: Cyrillic ",    0x0E),
+                ("loaded",                       0x0A),
+                (" | Locale: ",                  0x0E),
+                ("active",                       0x0A),
+            ],
+            crate::kernel_messages::Locale::ArEg => &[
+                ("[المرحلة 6] الخط: Cyrillic محمل | اللغة: مفعلة", 0x0E),
+            ],
+        };
+        if matches!(spec.direction, TextDirection::Rtl) {
+            // RTL: одна строка целиком
+            if let Some(&(text, color)) = segments.first() {
+                let mut buf = LocalizedBuffer::new();
+                let _ = buf.write_str(text);
+                write_codepoints_rtl_direct(buf.as_slice(), 24, 79, color, spec.numerals);
+            }
+        } else {
+            let mut col: usize = 0;
+            for &(text, color) in segments {
+                let mut buf = LocalizedBuffer::new();
+                let _ = buf.write_str(text);
+                write_codepoints_ltr_direct(buf.as_slice(), 24, col.min(79), color, spec.numerals);
+                col += buf.as_slice().len();
+            }
+        }
+    }
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        crate::vga_buffer::WRITER.lock().column_position = 0;
+    });
+}
 
 /// Печатает строку RTL на нижней строке VGA (row 24).
 /// Предварительно вызывает новую строку, чтобы освободить row 24.
@@ -525,17 +653,47 @@ unsafe fn write_codepoints_rtl_direct(
 ) {
     debug_assert!(row < 25, "write_codepoints_rtl: row={} >= 25", row);
     debug_assert!(end_col < 80, "write_codepoints_rtl: end_col={} >= 80", end_col);
-    // SAFETY: col уменьшается с `if col == 0 { break }` — не выходит за 0.
+    // SAFETY: col уменьшается с `if col == 0 { return }` — не выходит за 0.
+    // Числа (ASCII 0-9, '.', ',') пишутся в обратном порядке, чтобы отображаться
+    // слева направо внутри RTL-строки (BiDi: weak LTR run в RTL-контексте).
     let vga = 0xB8000 as *mut u8;
     let mut col = end_col;
-    for &cp in codepoints {
-        let mapped = map_display_char(char::from_u32(cp).unwrap_or('?'), numerals);
-        let byte = codepoint_to_vga_byte(mapped);
-        let off = (row * 80 + col) * 2;
-        core::ptr::write_volatile(vga.add(off), byte);
-        core::ptr::write_volatile(vga.add(off + 1), attr);
-        if col == 0 { break; }
-        col -= 1;
+    let n = codepoints.len();
+    let mut i = 0usize;
+    while i < n {
+        let cp = codepoints[i];
+        // Начало числового прогона?
+        if cp >= 0x30 && cp <= 0x39 {
+            // Находим конец прогона: цифры и разделители '.' ',' между ними
+            let run_start = i;
+            i += 1;
+            while i < n {
+                let c = codepoints[i];
+                if (c >= 0x30 && c <= 0x39) || c == 0x2E || c == 0x2C { i += 1; } else { break; }
+            }
+            // Пишем прогон В ОБРАТНОМ порядке (i-1 → run_start),
+            // чтобы первая цифра оказалась на меньшем col → LTR на экране
+            let mut k = i;
+            while k > run_start {
+                k -= 1;
+                let mapped = map_display_char(char::from_u32(codepoints[k]).unwrap_or('?'), numerals);
+                let byte = codepoint_to_vga_byte(mapped);
+                let off = (row * 80 + col) * 2;
+                core::ptr::write_volatile(vga.add(off), byte);
+                core::ptr::write_volatile(vga.add(off + 1), attr);
+                if col == 0 { return; }
+                col -= 1;
+            }
+        } else {
+            let mapped = map_display_char(char::from_u32(cp).unwrap_or('?'), numerals);
+            let byte = codepoint_to_vga_byte(mapped);
+            let off = (row * 80 + col) * 2;
+            core::ptr::write_volatile(vga.add(off), byte);
+            core::ptr::write_volatile(vga.add(off + 1), attr);
+            if col == 0 { return; }
+            col -= 1;
+            i += 1;
+        }
     }
 }
 

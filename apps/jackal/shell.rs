@@ -28,6 +28,7 @@ static mut S_JKL:    [u8; encoder::JKL_HEADER_SIZE + encoder::MAX_ENCODED]
                    = [0u8; encoder::JKL_HEADER_SIZE + encoder::MAX_ENCODED];
 static mut S_ARCH:   archive::Archive = archive::Archive::new();
 static mut S_UNPACK: archive::Archive = archive::Archive::new();
+static mut S_PACKED: [u8; 8 * 1024] = [0u8; 8 * 1024]; // был на стеке → DF
 
 /// Главный вход: принимает сырые байты, печатает отчёт.
 pub fn run_on_slice(data: &[u8], label: &str) {
@@ -169,22 +170,30 @@ The quick brown fox jumps over the lazy dog. 1234567890\n\
 ";
 
 pub fn run_demo() {
+    crate::trace::record("jackal demo entered");
     crate::vga_buffer::clear_screen();
     crate::locale::print_localized_line("=== JACKAL ANALYZER DEMO ===", 0x0E);
     crate::locale::print_localized_line("Analysing built-in test slice...", 0x07);
 
+    crate::trace::record("jackal run_on_slice start");
     run_on_slice(DEMO_DATA, "demo-slice");
+    crate::trace::record("jackal run_on_slice done");
 
+    crate::trace::record("jackal analyze for encode start");
     let report = analyzer::analyze(DEMO_DATA);
+    crate::trace::record("jackal analyze for encode done");
     unsafe {
+        crate::trace::record("jackal encode_into start");
         encoder::encode_into(DEMO_DATA, &report,
             &mut *core::ptr::addr_of_mut!(S_BLOCK));
+        crate::trace::record("jackal encode_into done");
     }
 
     crate::locale::print_localized_line("", 0x07);
     unsafe { print_encoder_result(&*core::ptr::addr_of!(S_BLOCK)); }
 
     let (header_len, payload_len) = unsafe {
+        crate::trace::record("jackal jkl header build start");
         let block = &*core::ptr::addr_of!(S_BLOCK);
         let jkl   = &mut *core::ptr::addr_of_mut!(S_JKL);
         let hl = encoder::write_jkl_header(jkl, block);
@@ -196,19 +205,24 @@ pub fn run_demo() {
                 pl,
             );
         }
+        crate::trace::record("jackal jkl header build done");
         (hl, pl)
     };
 
     const JKL_MAX: usize = encoder::JKL_HEADER_SIZE + encoder::MAX_ENCODED;
     if header_len > 0 && header_len + payload_len <= JKL_MAX {
+        crate::trace::record("jackal validate jkl start");
         let status = unsafe {
             let jkl = &*core::ptr::addr_of!(S_JKL);
             validate::validate(&jkl[..header_len + payload_len])
         };
+        crate::trace::record("jackal validate jkl done");
         crate::locale::print_localized_fmt(0x0B, format_args!("[VALIDATE] {}", status.description()));
         unsafe {
+            crate::trace::record("jackal archive roundtrip start");
             let jkl = &*core::ptr::addr_of!(S_JKL);
             demo_archive_roundtrip(&jkl[..header_len + payload_len]);
+            crate::trace::record("jackal archive roundtrip done");
         }
     } else {
         crate::locale::print_localized_line("[VALIDATE] skipped: buffer overflow", 0x0C);
@@ -216,35 +230,42 @@ pub fn run_demo() {
 
     crate::locale::print_localized_line("", 0x07);
     crate::locale::print_localized_line("Press any key to return to APPS menu...", 0x08);
+    crate::trace::record("jackal wait_key start");
     wait_key();
+    crate::trace::record("jackal wait_key done");
 }
 
 unsafe fn demo_archive_roundtrip(jkl: &[u8]) {
+    crate::trace::record("jackal arch reset start");
     let arch = &mut *core::ptr::addr_of_mut!(S_ARCH);
     arch.count = 0;
+    crate::trace::record("jackal arch add blocks start");
     let ok_main = arch.add_jkl_block(b"demo.jkl", jkl);
     let ok_note = arch.add(b"note.txt", b"Jackal archive demo payload");
+    crate::trace::record("jackal arch add blocks done");
 
     if !ok_main || !ok_note {
         crate::locale::print_localized_line("[ARCH] add block failed", 0x0C);
         return;
     }
 
-    let mut packed = [0u8; 8 * 1024];
-    let packed_len = archive::pack(&*core::ptr::addr_of!(S_ARCH), &mut packed);
+    let packed_len = archive::pack(&*core::ptr::addr_of!(S_ARCH), &mut *core::ptr::addr_of_mut!(S_PACKED));
+    crate::trace::record("jackal arch pack done");
     if packed_len == 0 {
         crate::locale::print_localized_line("[ARCH] pack failed", 0x0C);
         return;
     }
 
-    let status = validate::validate(&packed[..packed_len]);
+    let packed_slice = &(&(*core::ptr::addr_of!(S_PACKED)))[..packed_len];
+    let status = validate::validate(packed_slice);
     crate::locale::print_localized_fmt(
         0x0B,
         format_args!("[ARCH] validate={} bytes={}", status.description(), packed_len),
     );
 
-    match archive::unpack_into(&packed[..packed_len], &mut *core::ptr::addr_of_mut!(S_UNPACK)) {
+    match archive::unpack_into(packed_slice, &mut *core::ptr::addr_of_mut!(S_UNPACK)) {
         Ok(()) => {
+            crate::trace::record("jackal arch unpack ok");
             let unpacked = &*core::ptr::addr_of!(S_UNPACK);
             crate::locale::print_localized_fmt(0x0A, format_args!("[ARCH] blocks={}", unpacked.count));
             for i in 0..unpacked.count {
@@ -259,6 +280,7 @@ unsafe fn demo_archive_roundtrip(jkl: &[u8]) {
             }
         }
         Err(e) => {
+            crate::trace::record("jackal arch unpack err");
             crate::locale::print_localized_fmt(0x0C, format_args!("[ARCH] unpack failed: {}", e));
         }
     }

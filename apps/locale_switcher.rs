@@ -56,9 +56,9 @@ struct LocaleEntry {
 }
 
 const ITEMS: &[LocaleEntry] = &[
-    LocaleEntry { locale: Locale::RuRu, name: b"RU", desc: b"Russian  \xB7  Cyrillic, LTR",      tag: b"[RU]" },
-    LocaleEntry { locale: Locale::EnUs, name: b"EN", desc: b"English  \xB7  ASCII, LTR",          tag: b"[EN]" },
-    LocaleEntry { locale: Locale::ArEg, name: b"AR", desc: b"Arabic   \xB7  RTL, Arabic-Indic",   tag: b"[AR]" },
+    LocaleEntry { locale: Locale::RuRu, name: b"RU", desc: b"Russian  \xB7  Cyrillic, LTR",  tag: b"[RU]" },
+    LocaleEntry { locale: Locale::EnUs, name: b"EN", desc: b"English  \xB7  ASCII, LTR",      tag: b"[EN]" },
+    LocaleEntry { locale: Locale::ArEg, name: b"AR", desc: b"Arabic   \xB7  RTL",             tag: b"[AR]" },
 ];
 
 const BOX_COL: usize = 22;

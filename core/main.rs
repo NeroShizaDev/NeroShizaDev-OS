@@ -72,10 +72,21 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // ============================================================
     blog_os::vga_buffer::clear_screen();
     blog_os::logo::show_boot_logo();
+    blog_os::locale::print_localized_line(
+        blog_os::user_messages::current(blog_os::user_messages::UiText::SystemCheckHeader),
+        0x0B,
+    );
     // Детектируем VGA и пробуем расширенный режим (90×30).
     // probe_vga() внутри проверяет порт 0x3DA перед записью в CRTC.
     let vga_mode = blog_os::vga_hw::detect_and_switch();
-    blog_os::locale::print_localized_fmt(0x0E, format_args!("[VGA] Mode: {:?}", vga_mode));
+    match blog_os::locale::get_locale() {
+        blog_os::kernel_messages::Locale::RuRu =>
+            blog_os::locale::print_localized_fmt(0x0E, format_args!("[Фаза 1] VGA: {:?}", vga_mode)),
+        blog_os::kernel_messages::Locale::EnUs =>
+            blog_os::locale::print_localized_fmt(0x0E, format_args!("[Phase 1] VGA: {:?}", vga_mode)),
+        blog_os::kernel_messages::Locale::ArEg =>
+            blog_os::locale::print_localized_fmt(0x0E, format_args!("[المرحلة 1] VGA: {:?}", vga_mode)),
+    }
     blog_os::serial_println!("[ЯДРО] Фаза 1: VGA детект завершён, режим: {:?}", vga_mode);
     blog_os::trace::record("vga detect complete");
 
@@ -86,9 +97,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     blog_os::init();
     blog_os::serial_println!("[ЯДРО] Фаза 2: GDT + IDT + PICS + FPU готовы");
     blog_os::trace::record("gdt idt pics fpu ready");
-    blog_os::locale::print_localized_line(
+    blog_os::locale::print_boot_status(
         blog_os::user_messages::current(blog_os::user_messages::UiText::Phase2CpuOk),
-        0x0E,
     );
 
     // ============================================================
@@ -96,9 +106,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Физическая память и куча инициализированы загрузчиком (bootimage).
     // При необходимости здесь будет memory::init(physical_offset).
     // ============================================================
-    blog_os::locale::print_localized_line(
+    blog_os::locale::print_boot_status(
         blog_os::user_messages::current(blog_os::user_messages::UiText::Phase3MemoryOk),
-        0x0E,
     );
     blog_os::serial_println!("[ЯДРО] Фаза 3: Память ОК");
 
@@ -107,34 +116,34 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Сначала validator::probe_cmos() (уже внутри display_status),
     // затем чтение времени, температура CPU, RNG.
     // ============================================================
-    blog_os::rtc::display_status();   // probe → battery → UIP → время
-    blog_os::rtc::display_thermal();  // MSR 0x19C → температура CPU
-    blog_os::serial_println!("[ЯДРО] Фаза 4: RTC + термо готово");
+    blog_os::rtc::display_status();
+    blog_os::rtc::display_thermal();
     blog_os::trace::record("rtc validator phase done");
 
     let rng_ok = blog_os::rng::is_supported();
     blog_os::serial_println!("[ЯДРО] Фаза 4: RDRAND {}", if rng_ok { "ВКЛ" } else { "ВЫКЛ" });
-    blog_os::locale::print_localized_fmt(
+    blog_os::locale::print_localized_line(
+        blog_os::user_messages::current(if rng_ok {
+            blog_os::user_messages::UiText::Phase4RngOn
+        } else {
+            blog_os::user_messages::UiText::Phase4RngOff
+        }),
         0x0E,
-        format_args!(
-            "[RNG] RDRAND: {}",
-            if rng_ok { "ON" } else { "OFF" }
-        ),
     );
 
     // ============================================================
     // ФАЗА 5: Железо и Ввод
     // PS/2 probe → speaker probe → OK-сигнал.
     // ============================================================
-    blog_os::validator::display_ps2_probe();
-    blog_os::serial_println!("[ЯДРО] Фаза 5: PS/2 опрос завершён");
+    let ps2_ok = blog_os::validator::probe_ps2();
+    blog_os::serial_println!("[ЯДРО] Фаза 5: PS/2 {}", if ps2_ok { "OK" } else { "NO" });
     blog_os::trace::record("ps2 probe complete");
+    blog_os::validator::display_ps2_probe();
 
     if blog_os::validator::probe_speaker() {
         blog_os::serial_println!("[ЯДРО] Фаза 5: Спикер ОК");
-        blog_os::locale::print_localized_line(
+        blog_os::locale::print_boot_status(
             blog_os::user_messages::current(blog_os::user_messages::UiText::Phase5SpeakerOk),
-            0x0E,
         );
         boot_beep();
     } else {
@@ -153,19 +162,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     blog_os::locale::draw_locale_badge();
     blog_os::serial_println!("[ЯДРО] Фаза 6: Шрифт + локаль готовы");
     blog_os::trace::record("font + locale ready");
-    blog_os::locale::print_localized_line(
-        blog_os::user_messages::current(blog_os::user_messages::UiText::Phase6FontLocaleOk),
-        0x0E,
-    );
+    blog_os::locale::print_phase6_ok();
     print_startup_banner();
 
     // ============================================================
     // ФАЗА 7: Пространство пользователя — Shell готов
-    // FPU-демо, RNG-демо, приглашение.
-    // Команды: menger / voodoo / doom — доступны из shell.
+    // Все демо-приложения запускаются через APPS меню.
     // ============================================================
-    blog_os::fpu::demo();
-    blog_os::rng::demo();
     print_ready_message();
     blog_os::print!("> ");
 
@@ -245,7 +248,7 @@ fn print_startup_banner() {
 // ================================================================
 fn print_ready_message() {
     blog_os::locale::print_localized_line(
-        blog_os::user_messages::current(blog_os::user_messages::UiText::SystemReadyHint),
+        blog_os::user_messages::current(blog_os::user_messages::UiText::Phase7ShellReady),
         0x0A,
     );
 }

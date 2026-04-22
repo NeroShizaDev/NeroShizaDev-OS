@@ -12,6 +12,7 @@
 pub mod activity;
 pub mod launcher;
 pub mod games;
+pub mod installer;
 pub mod jackal;
 pub mod locale_switcher;
 

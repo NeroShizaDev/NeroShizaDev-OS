@@ -31,16 +31,18 @@ unsafe fn fill_screen(color: u8) {
     for r in 0..25usize { fill_seg(r, 0, 80, color); }
 }
 
-// ── CP437 box-drawing ────────────────────────────────────────────────────────
-const TL:  u8 = 0xC9; // ╔
-const TR:  u8 = 0xBB; // ╗
-const BL:  u8 = 0xC8; // ╚
-const BR:  u8 = 0xBC; // ╝
-const HZ:  u8 = 0xCD; // ═
-const VT:  u8 = 0xBA; // ║
-const ML:  u8 = 0xCC; // ╠
-const MR:  u8 = 0xB9; // ╣
-const SEP: u8 = 0xB3; // │
+// ── ASCII frame chars ────────────────────────────────────────────────────────
+const TL:  u8 = b'+';
+const TR:  u8 = b'+';
+const BL:  u8 = b'+';
+const BR:  u8 = b'+';
+const HZ:  u8 = b'-';
+const VT:  u8 = b'|';
+const ML:  u8 = b'+';
+const MR:  u8 = b'+';
+const SL:  u8 = b'+';
+const SR:  u8 = b'+';
+const SEP: u8 = b'|';
 const ARW: u8 = 0x10; // ►
 
 // ── Colors (Blue bg palette) ──────────────────────────────────────────────────
@@ -86,22 +88,106 @@ const ENTRIES: &[Entry] = &[
     Entry { is_header: false, app: Some(AppKind::Locale),  name: b"Language",desc: b"Switch RU / EN / AR interface",   tag: b"[Lang]  " },
     // ─────────────────────────────────────────────────────────────────────────
     Entry { is_header: true,  app: None,                   name: b"",         desc: b"", tag: b"" },
-    Entry { is_header: false, app: Some(AppKind::Shell),  name: b"Shell",   desc: b"Back to IBIP terminal",           tag: b"[Exit]  " },
+    Entry { is_header: false, app: None,                  name: b"Shell",   desc: b"Back to IBIP terminal",           tag: b"[Exit]  " },
 ];
 
 // ── Layout constants ──────────────────────────────────────────────────────────
-const BOX_COL: usize = 13;
-const BOX_W:   usize = 53;
-const BOX_ROW: usize = 1;   // breadcrumb на row 0, бокс с row 1 — влезает 16 строк в 25
+const BOX_COL:      usize = 0;   // полный экран: бокс от col 0
+const BOX_W:        usize = 78;  // inner width: cols 1..78, border at 0 и 79
+const BOX_ROW:      usize = 1;   // breadcrumb на row 0, бокс с row 1
+const VISIBLE_ITEMS: usize = 19; // rows 4..22 — без gap-строки, bot=23, hint=24
+
+// ── Merged item list — static + dynamic NHS ───────────────────────────────────
+
+/// Индекс NHS-слота для запуска. Устанавливается update() до Push(AppKind::Nhs).
+pub static mut LAUNCH_NHS_SLOT: u8 = 0;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IKind {
+    Stat,   // ENTRIES[index]
+    NhsH,   // заголовок секции NHS INSTALLED
+    NhsA,   // NHS-приложение из реестра, index = номер слота
+}
+
+#[derive(Clone, Copy)]
+struct LItem {
+    kind:      IKind,
+    index:     usize,
+    is_header: bool,
+}
+
+const MAX_ITEMS: usize = 36;
+
+/// Строим объединённый список: статические ENTRIES + NHS-секция из реестра.
+/// NHS-секция вставляется перед последними 2 записями (разделитель + Shell).
+fn build_items(buf: &mut [LItem; MAX_ITEMS]) -> usize {
+    let mut n = 0;
+
+    // Статические записи до последних 2 (пустой разделитель + Shell)
+    let split_at = ENTRIES.len().saturating_sub(2);
+    for i in 0..split_at {
+        if n >= MAX_ITEMS { break; }
+        buf[n] = LItem { kind: IKind::Stat, index: i, is_header: ENTRIES[i].is_header };
+        n += 1;
+    }
+
+    // NHS-секция — только если есть установленные пакеты
+    let mut has_nhs = false;
+    for slot in 0..crate::apps::installer::slots::MAX_SLOTS {
+        if crate::apps::installer::registry::get(slot).is_some() {
+            has_nhs = true;
+            break;
+        }
+    }
+    if has_nhs {
+        if n < MAX_ITEMS {
+            buf[n] = LItem { kind: IKind::NhsH, index: 0, is_header: true };
+            n += 1;
+        }
+        for slot in 0..crate::apps::installer::slots::MAX_SLOTS {
+            if crate::apps::installer::registry::get(slot).is_some() {
+                if n < MAX_ITEMS {
+                    buf[n] = LItem { kind: IKind::NhsA, index: slot, is_header: false };
+                    n += 1;
+                }
+            }
+        }
+    }
+
+    // Последние 2 статические записи (разделитель + Shell)
+    for i in split_at..ENTRIES.len() {
+        if n >= MAX_ITEMS { break; }
+        buf[n] = LItem { kind: IKind::Stat, index: i, is_header: ENTRIES[i].is_header };
+        n += 1;
+    }
+
+    n
+}
+
+fn first_selectable(items: &[LItem; MAX_ITEMS], n: usize) -> usize {
+    let mut s = 0;
+    while s < n && items[s].is_header { s += 1; }
+    s
+}
 
 // ── Lifecycle hooks (called by ActivityManager) ───────────────────────────────
 
 pub fn on_start() {
-    draw(0, 1);
+    let mut items = [LItem { kind: IKind::Stat, index: 0, is_header: false }; MAX_ITEMS];
+    let n = build_items(&mut items);
+    let sel = first_selectable(&items, n);
+    unsafe { render(&items, n, sel, 0, 1); }
 }
 
 pub fn on_resume() {
-    draw(0, 1);
+    // Drain any scancodes accumulated while another app was running.
+    // Without this, keys pressed during FPU/Menger/etc. animation phases
+    // leak into the Launcher and can trigger accidental Esc → Pop → shell.
+    crate::ps2::clear_scancode_queue();
+    let mut items = [LItem { kind: IKind::Stat, index: 0, is_header: false }; MAX_ITEMS];
+    let n = build_items(&mut items);
+    let sel = first_selectable(&items, n);
+    unsafe { render(&items, n, sel, 0, 1); }
 }
 
 pub fn on_pause() {
@@ -111,10 +197,13 @@ pub fn on_pause() {
 /// Blocking poll: wait for user action, return what the manager should do.
 /// `depth` = current ActivityStack depth (for breadcrumb dots).
 pub fn update(depth: usize) -> ActivityIntent {
-    // Начинаем с первой выбираемой записи (не заголовок)
-    let mut sel: usize = 0;
-    while sel < ENTRIES.len() && ENTRIES[sel].is_header { sel += 1; }
-    draw(sel, depth);
+    // Собираем объединённый список (статика + NHS-реестр)
+    let mut items = [LItem { kind: IKind::Stat, index: 0, is_header: false }; MAX_ITEMS];
+    let n = build_items(&mut items);
+
+    let mut sel: usize = first_selectable(&items, n);
+    let mut scroll: usize = 0;
+    unsafe { render(&items, n, sel, scroll, depth); }
 
     unsafe {
         loop {
@@ -124,21 +213,41 @@ pub fn update(depth: usize) -> ActivityIntent {
 
                 match sc {
                     0x48 => { // ↑ — пропускаем заголовки
-                        let mut s = if sel == 0 { ENTRIES.len() - 1 } else { sel - 1 };
-                        while ENTRIES[s].is_header { s = if s == 0 { ENTRIES.len() - 1 } else { s - 1 }; }
+                        let mut s = if sel == 0 { n - 1 } else { sel - 1 };
+                        while s > 0 && items[s].is_header { s -= 1; }
+                        if items[s].is_header { // wrap-around всё ещё на заголовке
+                            s = n - 1;
+                            while s > 0 && items[s].is_header { s -= 1; }
+                        }
                         sel = s;
-                        draw(sel, depth);
+                        if sel < scroll { scroll = sel; }
+                        render(&items, n, sel, scroll, depth);
                     }
                     0x50 => { // ↓ — пропускаем заголовки
-                        let mut s = (sel + 1) % ENTRIES.len();
-                        while ENTRIES[s].is_header { s = (s + 1) % ENTRIES.len(); }
+                        let mut s = sel + 1;
+                        if s >= n { s = 0; }
+                        while s < n && items[s].is_header { s += 1; }
+                        if s >= n { s = 0; while s < n && items[s].is_header { s += 1; } }
                         sel = s;
-                        draw(sel, depth);
+                        if sel >= scroll + VISIBLE_ITEMS {
+                            scroll = sel + 1 - VISIBLE_ITEMS;
+                        }
+                        render(&items, n, sel, scroll, depth);
                     }
                     0x1C => { // Enter
-                        return match ENTRIES[sel].app {
-                            Some(kind) => ActivityIntent::Push(kind),
-                            None       => ActivityIntent::Pop,
+                        let item = items[sel];
+                        return match item.kind {
+                            IKind::Stat => {
+                                match ENTRIES[item.index].app {
+                                    Some(kind) => ActivityIntent::Push(kind),
+                                    None       => ActivityIntent::Pop,
+                                }
+                            }
+                            IKind::NhsA => {
+                                LAUNCH_NHS_SLOT = item.index as u8;
+                                ActivityIntent::Push(AppKind::Nhs)
+                            }
+                            IKind::NhsH => ActivityIntent::Continue,
                         };
                     }
                     0x01 => return ActivityIntent::Pop, // Esc
@@ -152,14 +261,10 @@ pub fn update(depth: usize) -> ActivityIntent {
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
-fn draw(sel: usize, depth: usize) {
-    unsafe { render(sel, depth); }
-}
-
-unsafe fn render(sel: usize, depth: usize) {
+unsafe fn render(items: &[LItem; MAX_ITEMS], n: usize, sel: usize, scroll: usize, depth: usize) {
     fill_screen(BG);
 
-    // Breadcrumb: на row 0 (бокс с row 1)
+    // Breadcrumb: на row 0
     puts(0, 2, b"[ NeroShizaDev-OS ]", TITLE);
     puts(0, 21, b" \xB7 APPS", BORDER);
     if depth > 1 {
@@ -176,7 +281,7 @@ unsafe fn render(sel: usize, depth: usize) {
     let h = BOX_ROW + 1;
     put(h, BOX_COL, VT, BORDER);
     fill_seg(h, BOX_COL + 1, BOX_W, TITLE);
-    puts(h, BOX_COL + 11, b"LAUNCH PAD  \xB7  NeroShizaDev-OS  \xB7  HYBRID", TITLE);
+    puts(h, BOX_COL + 18, b"LAUNCH PAD  \xB7  NeroShizaDev-OS  \xB7  HYBRID", TITLE);
     put(h, BOX_COL + BOX_W + 1, VT, BORDER);
 
     // Divider
@@ -185,61 +290,129 @@ unsafe fn render(sel: usize, depth: usize) {
     for c in 1..=BOX_W { put(div, BOX_COL + c, HZ, BORDER); }
     put(div, BOX_COL + BOX_W + 1, MR, BORDER);
 
-    // Gap before items — убран, заголовки секций заменяют пустую строку
+    // Menu items (с прокруткой)
+    for vis in 0..VISIBLE_ITEMS {
+        let i = scroll + vis;
+        let row = BOX_ROW + 3 + vis;
 
-    // Menu items (с заголовками секций как Windows Start)
-    for (i, e) in ENTRIES.iter().enumerate() {
-        let row = BOX_ROW + 3 + i;  // items с BOX_ROW+3 (header+divider заняли +2)
+        if i >= n {
+            // Строки за пределами списка — пустые
+            vt_blank(row);
+            continue;
+        }
 
-        if e.is_header {
-            // Секция-разделитель: заполняем горизонтальными линиями, поверх пишем название
-            put(row, BOX_COL, VT, BORDER);
-            for c in 1..=BOX_W { put(row, BOX_COL + c, 0xC4, HINT); }
-            if !e.name.is_empty() {
-                put(row, BOX_COL + 2, b' ', HINT);
-                puts(row, BOX_COL + 3, e.name, TAG);
-                let end = BOX_COL + 3 + e.name.len();
-                if end < BOX_COL + BOX_W { put(row, end, b' ', HINT); }
+        let item = items[i];
+        match item.kind {
+            IKind::Stat => {
+                let e = &ENTRIES[item.index];
+                if e.is_header {
+                    render_section_header(row, e.name);
+                } else {
+                    render_static_entry(row, e, i == sel);
+                }
             }
-            put(row, BOX_COL + BOX_W + 1, VT, BORDER);
-        } else {
-            let is_sel = i == sel;
-            let fg     = if is_sel { HILIT } else { NORMAL };
-            let row_bg = if is_sel { HILIT } else { BG };
-
-            put(row, BOX_COL, VT, BORDER);
-            fill_seg(row, BOX_COL + 1, BOX_W, row_bg);
-
-            put(row, BOX_COL + 2, if is_sel { ARW } else { b' ' }, fg);
-            put(row, BOX_COL + 3, b' ', fg);
-
-            let nc = BOX_COL + 4;
-            puts(row, nc, e.name, fg);
-            for p in e.name.len()..9 { put(row, nc + p, b' ', fg); }
-
-            put(row, BOX_COL + 13, SEP, if is_sel { HILIT } else { BORDER });
-
-            puts(row, BOX_COL + 15, e.desc, fg);
-
-            let tc = BOX_COL + BOX_W + 1 - e.tag.len() - 1;
-            puts(row, tc, e.tag, if is_sel { HILIT } else { TAG });
-
-            put(row, BOX_COL + BOX_W + 1, VT, BORDER);
+            IKind::NhsH => render_section_header(row, b" INSTALLED"),
+            IKind::NhsA => render_nhs_entry(row, item.index, i == sel),
         }
     }
 
-    // Gap after items
-    let gap2 = BOX_ROW + 3 + ENTRIES.len();
-    vt_blank(gap2);
+    // Индикаторы прокрутки ▲ ▼
+    if scroll > 0 {
+        put(BOX_ROW + 3, BOX_COL + BOX_W, 0x1E, BORDER); // ▲
+    }
+    if scroll + VISIBLE_ITEMS < n {
+        put(BOX_ROW + 3 + VISIBLE_ITEMS - 1, BOX_COL + BOX_W, 0x1F, BORDER); // ▼
+    }
 
-    // Bottom border
-    let bot = gap2 + 1;
+    // Bottom border (row 23, вплотную к items — gap убран для fullscreen)
+    let bot = BOX_ROW + 3 + VISIBLE_ITEMS;
     put(bot, BOX_COL, BL, BORDER);
     for c in 1..=BOX_W { put(bot, BOX_COL + c, HZ, BORDER); }
     put(bot, BOX_COL + BOX_W + 1, BR, BORDER);
 
-    // Controls hint
-    puts(bot + 2, 17, b"\x18\x19 navigate    Enter launch    Esc back to shell", HINT);
+    // Controls hint (row 24 — последняя строка экрана)
+    puts(bot + 1, 17, b"\x18\x19 navigate    Enter launch    Esc back to shell", HINT);
+
+    // Locale badge (row 0, col 72..79) — перерисовываем после fill_screen
+    crate::locale::draw_locale_badge();
+}
+
+unsafe fn render_section_header(row: usize, name: &[u8]) {
+    put(row, BOX_COL, SL, BORDER);
+    for c in 1..=BOX_W { put(row, BOX_COL + c, b'-', HINT); }
+    if !name.is_empty() {
+        put(row, BOX_COL + 2, b' ', HINT);
+        puts(row, BOX_COL + 3, name, TAG);
+        let end = BOX_COL + 3 + name.len();
+        if end < BOX_COL + BOX_W { put(row, end, b' ', HINT); }
+    }
+    put(row, BOX_COL + BOX_W + 1, SR, BORDER);
+}
+
+unsafe fn render_static_entry(row: usize, e: &Entry, is_sel: bool) {
+    let fg     = if is_sel { HILIT } else { NORMAL };
+    let row_bg = if is_sel { HILIT } else { BG };
+
+    put(row, BOX_COL, VT, BORDER);
+    fill_seg(row, BOX_COL + 1, BOX_W, row_bg);
+    put(row, BOX_COL + 2, if is_sel { ARW } else { b' ' }, fg);
+    put(row, BOX_COL + 3, b' ', fg);
+
+    let nc = BOX_COL + 4;
+    puts(row, nc, e.name, fg);
+    for p in e.name.len()..9 { put(row, nc + p, b' ', fg); }
+    put(row, BOX_COL + 13, SEP, if is_sel { HILIT } else { BORDER });
+    puts(row, BOX_COL + 15, e.desc, fg);
+    let tc = BOX_COL + BOX_W + 1 - e.tag.len() - 1;
+    puts(row, tc, e.tag, if is_sel { HILIT } else { TAG });
+    put(row, BOX_COL + BOX_W + 1, VT, BORDER);
+}
+
+unsafe fn render_nhs_entry(row: usize, slot: usize, is_sel: bool) {
+    let fg     = if is_sel { HILIT } else { NORMAL };
+    let row_bg = if is_sel { HILIT } else { BG };
+
+    put(row, BOX_COL, VT, BORDER);
+    fill_seg(row, BOX_COL + 1, BOX_W, row_bg);
+    put(row, BOX_COL + 2, if is_sel { ARW } else { b' ' }, fg);
+    put(row, BOX_COL + 3, b' ', fg);
+
+    let nc = BOX_COL + 4;
+
+    if let Some(app) = crate::apps::installer::registry::get(slot) {
+        // Имя приложения (до 9 символов)
+        let name = app.name_str().as_bytes();
+        let name_len = name.len().min(9);
+        puts(row, nc, &name[..name_len], fg);
+        for p in name_len..9 { put(row, nc + p, b' ', fg); }
+
+        put(row, BOX_COL + 13, SEP, if is_sel { HILIT } else { BORDER });
+
+        // Описание: тип пакета
+        let desc: &[u8] = if app.flags & crate::apps::installer::header::FLAG_HAS_SCRIPT != 0 {
+            b"NHS script app"
+        } else if app.flags & crate::apps::installer::header::FLAG_HAS_NATIVE != 0 {
+            b"NHS native app"
+        } else {
+            b"NHS package   "
+        };
+        puts(row, BOX_COL + 15, desc, fg);
+
+        // Тег в правой части
+        let vtag: &[u8] = if app.flags & crate::apps::installer::header::FLAG_HAS_SCRIPT != 0 {
+            b"[SCR]   "
+        } else if app.flags & crate::apps::installer::header::FLAG_HAS_NATIVE != 0 {
+            b"[BIN]   "
+        } else {
+            b"[NHS]   "
+        };
+        let tc = BOX_COL + BOX_W + 1 - vtag.len() - 1;
+        puts(row, tc, vtag, if is_sel { HILIT } else { TAG });
+    } else {
+        puts(row, nc, b"<empty>  ", fg);
+    }
+
+    put(row, BOX_COL + BOX_W + 1, VT, BORDER);
 }
 
 unsafe fn vt_blank(row: usize) {

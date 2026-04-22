@@ -246,13 +246,9 @@ fn render(angle: i64) {
 pub fn run_demo() {
     crate::vga_buffer::clear_screen();
 
-    // SAFETY: ps2::read_scancode — порт 0x60, сдвигает FIFO контроллера.
-    // Bare-metal ядро: единственный потребитель, нет конкурентных читателей.
-    let mut last_sc: u8 = unsafe { crate::ps2::read_scancode() };
-    for _ in 0..50000u32 {
-        let sc: u8 = unsafe { crate::ps2::read_scancode() };
-        if sc & 0x80 != 0 { last_sc = sc; break; }
-        last_sc = sc;
+    // B0.4: drain pending scancodes safely before entering the render loop
+    unsafe {
+        while crate::ps2::has_scancode() { crate::ps2::read_scancode(); }
     }
 
     let mut angle: i64 = 0;
@@ -263,14 +259,14 @@ pub fn run_demo() {
         angle += 30; // ~1.7° за кадр
         if angle > 6434 { angle -= 6434; }
 
-        // SAFETY: ps2::read_scancode — порт 0x60, проверяем скан-код для выхода.
-        let sc: u8 = unsafe { crate::ps2::read_scancode() };
-        if sc != last_sc && sc & 0x80 == 0 { break; }
-        last_sc = sc;
-
-        // SAFETY: ps2::wait_vblank — порт 0x3DA, ожидаем vblank без разрывов.
-        // Чтение сбрасывает AC flip-flop как побочный эффект (ожидаемо).
-        unsafe { crate::ps2::wait_vblank(); }
+        // B0.4: exit on any key-down, ignoring key-up events
+        unsafe {
+            if crate::ps2::has_scancode() {
+                let sc = crate::ps2::read_scancode();
+                if sc & 0x80 == 0 { break; } // key-down → exit
+            }
+            crate::ps2::wait_vblank();
+        }
     }
 
     crate::vga_buffer::clear_screen();
@@ -278,5 +274,5 @@ pub fn run_demo() {
         crate::user_messages::current(crate::user_messages::UiText::MengerDone),
         0x0B,
     );
-    crate::print!("> ");
+    // B0.3: do NOT print shell prompt — ActivityManager handles return to shell
 }

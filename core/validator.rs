@@ -64,14 +64,13 @@ pub fn probe_vga() -> bool { port_alive(0x3DA) }
 /// Выводит результат опроса PS/2 контроллера.
 pub fn display_ps2_probe() {
     if probe_ps2() {
-        crate::locale::print_localized_line(
+        crate::locale::print_boot_status(
             crate::user_messages::current(crate::user_messages::UiText::ValidatorPs2Ok),
-            0x0A,
         );
     } else {
         crate::locale::print_localized_line(
             crate::user_messages::current(crate::user_messages::UiText::ValidatorPs2NoResp),
-            0x0C,
+            0x0E,
         );
     }
 }
@@ -183,7 +182,12 @@ pub fn probe_rtc_ready() -> bool {
     let mut tries: u32 = 0;
     loop {
         let sta = unsafe { cmos_probe_reg(0x0A) };
-        if sta == 0xFF { return false; }     // чип умер в процессе
+        if sta == 0xFF {
+            crate::serial_println!(
+                "[VALIDATOR][RTC] probe_rtc_ready: StatusA=0xFF during UIP wait (chip disappeared)"
+            );
+            return false;
+        }
         if sta & 0x80 == 0 { return true; }  // UIP = 0, готов
         
         // Добавляем задержку для ожидания сброса UIP-флага
@@ -192,7 +196,14 @@ pub fn probe_rtc_ready() -> bool {
         }
         
         tries += 1;
-        if tries >= 65_000 { return false; } // завис
+        if tries >= 65_000 {
+            crate::serial_println!(
+                "[VALIDATOR][RTC] probe_rtc_ready: UIP stuck (tries={}, StatusA=0x{:02X})",
+                tries,
+                sta
+            );
+            return false;
+        }
     }
 }
 
@@ -201,10 +212,17 @@ pub fn probe_rtc_ready() -> bool {
 pub fn probe_cmos() -> CmosReport {
     let (chip_alive, status_a) = probe_chip();
     if !chip_alive {
+        crate::serial_println!("[VALIDATOR][CMOS] chip dead (StatusA=0xFF)");
         return CmosReport { chip_alive: false, battery_ok: false, rtc_ready: false, status_a };
     }
     let battery_ok = probe_battery();
     let rtc_ready  = probe_rtc_ready();
+    if !battery_ok {
+        crate::serial_println!("[VALIDATOR][CMOS] battery low/dead (RegD bit7=0)");
+    }
+    if !rtc_ready {
+        crate::serial_println!("[VALIDATOR][CMOS] RTC is not ready (UIP stuck or chip error)");
+    }
     CmosReport { chip_alive, battery_ok, rtc_ready, status_a }
 }
 
@@ -218,7 +236,7 @@ pub fn display_cmos_probe(report: &CmosReport) {
         return;
     }
     let bat_str = if report.battery_ok { "ОК (жива)" } else { "СДОХЛА! Время недостоверно" };
-    let rtc_str = if report.rtc_ready  { "готов"     } else { "UIP завис — чип завис?" };
+    let rtc_str = if report.rtc_ready  { "ОК"        } else { "UIP завис — чип завис?" };
     crate::user_messages::print_validator_cmos(report.status_a, bat_str, rtc_str);
 }
 
@@ -243,26 +261,20 @@ pub enum ErrorLevel {
 pub fn handle_hw_error(level: ErrorLevel, msg: &str) {
     match level {
         ErrorLevel::Recoverable => {
-            crate::serial_println!("[ВНИМАНИЕ] {}", msg);
+            crate::serial_println!("[VALIDATOR][WARN] {}", msg);
+            // Минимальная VGA-строка: основной разбор идёт через serial.log.
             crate::user_messages::print_validator_warn(msg);
         }
         ErrorLevel::ExitToShell => {
-            crate::serial_println!("[ОШИБКА] Возврат в шелл: {}", msg);
+            crate::serial_println!("[VALIDATOR][ERR] return to shell: {}", msg);
             crate::user_messages::print_validator_err(msg);
         }
         ErrorLevel::Fatal => {
-            crate::serial_println!("[ФАТАЛЬНО] {}", msg);
+            crate::serial_println!("[VALIDATOR][FATAL] {}", msg);
+            crate::serial_println!("[VALIDATOR][FATAL] hard reboot disabled; system will halt");
             crate::user_messages::print_validator_fatal(msg);
-            unsafe {
-                crate::serial_println!("[ФАТАЛЬНО] Попытка перезагрузки...");
-                x86_64::instructions::port::Port::<u8>::new(0x64).write(0xFE);
-                x86_64::instructions::port::Port::<u8>::new(0x92).write(0x01);
-                x86_64::instructions::interrupts::disable();
-                let null_idt = core::mem::MaybeUninit::<[u64; 16]>::zeroed();
-                core::arch::asm!("lidt [{}]", in(reg) &null_idt, options(nostack));
-                core::arch::asm!("int 0x3");
-                loop { x86_64::instructions::hlt(); }
-            }
+            x86_64::instructions::interrupts::disable();
+            loop { x86_64::instructions::hlt(); }
         }
     }
 }

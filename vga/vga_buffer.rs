@@ -216,7 +216,28 @@ pub fn scroll_total() -> usize {
     unsafe { SCROLL_TOTAL }
 }
 
+/// Сохраняет текущий VGA-экран только в SAVED_SCREEN (для восстановления по Esc).
+/// НЕ пишет в кольцевой scrollback буфер — строки уже там от new_line().
+/// Вызывать из enter_scroll_mode() вместо save_screen_to_scrollback().
+pub fn save_screen_snapshot() {
+    let buffer_height = get_buffer_height();
+    let buffer_width = get_buffer_width();
+    unsafe {
+        let vga = 0xB8000 as *const u8;
+        let saved = &raw mut SAVED_SCREEN as *mut u8;
+        for row in 0..buffer_height {
+            for col in 0..buffer_width {
+                let off = row * buffer_width * 2 + col * 2;
+                *saved.add(off) = *vga.add(off);
+                *saved.add(off + 1) = *vga.add(off + 1);
+            }
+        }
+    }
+}
+
 /// Сохраняет текущий VGA-экран в SAVED_SCREEN и дописывает видимые строки в scrollback.
+/// ВНИМАНИЕ: вызов этой функции добавляет все видимые строки в кольцо повторно!
+/// Использовать только в контексте, где строки ещё не были добавлены через new_line().
 pub fn save_screen_to_scrollback() {
     let buffer_height = get_buffer_height();
     let buffer_width = get_buffer_width();

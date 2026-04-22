@@ -1,12 +1,11 @@
 use crate::gdt;
-use core::sync::atomic::AtomicBool;
+use core::sync::atomic::Ordering;
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin;
 use x86_64::instructions::port::Port;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
-static FIRST_TIMER_IRQ: AtomicBool = AtomicBool::new(true);
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -72,18 +71,9 @@ extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) 
     crate::serial_println!("Указатель инструкции: {:#x}", _stack_frame.instruction_pointer.as_u64());
     crate::serial_println!("Указатель стека:      {:#x}", _stack_frame.stack_pointer.as_u64());
     crate::serial_println!("=====================================");
-    crate::trace::record_fatal("breakpoint handler entered");
-    unsafe {
-        let ip = _stack_frame.instruction_pointer.as_u64();
-        crate::locale::render_panic_screen(crate::kernel_messages::KernelEvent::BreakPoint);
-        crate::locale::write_crash_address(ip);
-        crate::locale::write_registers(
-            ip,
-            _stack_frame.stack_pointer.as_u64(),
-            _stack_frame.cpu_flags.bits(),
-        );
-    }
-    halt_forever()
+    // Breakpoint (INT3) — recoverable исключение. Логируем и возвращаемся.
+    // НЕ halt_forever() — иначе система зависает на первом int3 при отладке.
+    crate::trace::record("breakpoint hit");
 }
 
 extern "x86-interrupt" fn page_fault_handler(
@@ -209,48 +199,84 @@ extern "x86-interrupt" fn double_fault_handler(
     serial_str("==================================\r\n");
 
     // Прямая запись в VGA 0xB8000 — NO locale/mutex/println — только raw ptr.
-    // Вызов render_panic_screen() здесь вызывал ВТОРОЙ double fault (spin::Mutex
-    // уже залочен или стек повреждён) → triple fault → перезагрузка → мерцание.
-    unsafe {
-        // Строка 0: красный баннер "ABSOLUTE ABANDON — DOUBLE FAULT — HALTED"
+    // Здесь рисуем безопасную рамку (frame), чтобы сохранить ожидаемый вид crash-screen.
+    #[inline(always)]
+    fn vga_put(row: usize, col: usize, ch: u8, attr: u8) {
         let vga = 0xB8000 as *mut u16;
-        let msg: &[u8] = b"ABSOLUTE ABANDON  DOUBLE FAULT  IP=0x";
-        for (i, &b) in msg.iter().enumerate() {
-            core::ptr::write_volatile(vga.add(i), 0x4F00 | b as u16); // white on red
-        }
-        // Печатаем IP рядом с сообщением
-        let mut ip = _stack_frame.instruction_pointer.as_u64();
-        let offset = msg.len();
-        let mut buf = [0u8; 16];
-        for i in (0..16).rev() {
-            let d = (ip & 0xF) as u8;
-            buf[i] = if d < 10 { b'0' + d } else { b'a' + d - 10 };
-            ip >>= 4;
-        }
-        for (i, &b) in buf.iter().enumerate() {
-            core::ptr::write_volatile(vga.add(offset + i), 0x4F00 | b as u16);
-        }
-        // Строка 1: SP
-        let sp_msg: &[u8] = b"SP=0x";
-        for (i, &b) in sp_msg.iter().enumerate() {
-            core::ptr::write_volatile(vga.add(80 + i), 0x4E00 | b as u16); // yellow on red
-        }
-        let mut sp = _stack_frame.stack_pointer.as_u64();
-        let mut buf2 = [0u8; 16];
-        for i in (0..16).rev() {
-            let d = (sp & 0xF) as u8;
-            buf2[i] = if d < 10 { b'0' + d } else { b'a' + d - 10 };
-            sp >>= 4;
-        }
-        for (i, &b) in buf2.iter().enumerate() {
-            core::ptr::write_volatile(vga.add(80 + sp_msg.len() + i), 0x4E00 | b as u16);
-        }
-        // Строка 2: HALTED — не перезагружаемся!
-        let halt_msg: &[u8] = b"SYSTEM HALTED. PRESS RESET TO REBOOT.";
-        for (i, &b) in halt_msg.iter().enumerate() {
-            core::ptr::write_volatile(vga.add(160 + i), 0x4C00 | b as u16); // lt red on red
+        unsafe {
+            core::ptr::write_volatile(vga.add(row * 80 + col), ((attr as u16) << 8) | ch as u16);
         }
     }
+        #[inline(always)]
+        fn vga_write(row: usize, col: usize, s: &str, attr: u8) {
+            let mut c = col;
+            for &b in s.as_bytes() {
+                if c >= 80 { break; }
+                vga_put(row, c, b, attr);
+                c += 1;
+            }
+        }
+        fn vga_hex64(row: usize, col: usize, mut v: u64, attr: u8) {
+            let mut buf = [0u8; 16];
+            for i in (0..16).rev() {
+                let d = (v & 0xF) as u8;
+                buf[i] = if d < 10 { b'0' + d } else { b'a' + d - 10 };
+                v >>= 4;
+            }
+            for (i, &b) in buf.iter().enumerate() {
+                if col + i >= 80 { break; }
+                vga_put(row, col + i, b, attr);
+            }
+        }
+
+        const ATTR_BG: u8 = 0x0F; // white on black
+        const ATTR_FRAME: u8 = 0xDF; // white on magenta
+        const ATTR_HI: u8 = 0x0D; // bright magenta on black
+
+        // Clear screen
+        for row in 0..25 {
+            for col in 0..80 {
+                vga_put(row, col, b' ', ATTR_BG);
+            }
+        }
+        // Frame
+        for col in 0..80 {
+            vga_put(0, col, b'=', ATTR_FRAME);
+            vga_put(24, col, b'=', ATTR_FRAME);
+        }
+        for row in 1..24 {
+            vga_put(row, 0, b'|', ATTR_FRAME);
+            vga_put(row, 79, b'|', ATTR_FRAME);
+        }
+
+        vga_write(0, 22, "NeroShizaOS KERNEL EVENT", ATTR_FRAME);
+        vga_write(2, 3, "DF   [SAFE DOUBLE FAULT SCREEN]", ATTR_BG);
+        vga_write(4, 3, "DOUBLE FAULT. System halted.", ATTR_HI);
+
+        vga_write(7, 3, "RIP: 0x", ATTR_BG);
+        vga_hex64(7, 10, _stack_frame.instruction_pointer.as_u64(), ATTR_HI);
+        vga_write(8, 3, "RSP: 0x", ATTR_BG);
+        vga_hex64(8, 10, _stack_frame.stack_pointer.as_u64(), ATTR_HI);
+        vga_write(9, 3, "FLG: 0x", ATTR_BG);
+        vga_hex64(9, 10, _stack_frame.cpu_flags.bits(), ATTR_HI);
+
+        vga_write(11, 3, "Last actions:", ATTR_BG);
+        let mut row = 12usize;
+        if trace_len == 0 {
+            vga_write(row, 5, "- (none)", ATTR_HI);
+        } else {
+            let first = trace_len.saturating_sub(6);
+            for i in first..trace_len {
+                if row >= 23 { break; }
+                if let Some(entry) = crate::trace::get_recent(i) {
+                    vga_write(row, 5, "- ", ATTR_BG);
+                    vga_write(row, 7, entry, ATTR_BG);
+                    row += 1;
+                }
+            }
+        }
+
+    vga_write(23, 20, "System halted. Check serial.log", ATTR_BG);
 
     // Единственный выход — halt навсегда. БЕЗ render_panic_screen!
     // (render_panic_screen → spin::Mutex → triple fault → reboot loop)
@@ -278,7 +304,6 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
             ));
     }
 
-    let mut keyboard = KEYBOARD.lock();
     let mut port = Port::new(0x60);
 
     // SAFETY: порт 0x60 — PS/2 Data Register. Чтение в ISR обязательно:
@@ -286,61 +311,41 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     // ISR-контекст: нет конкурентного доступа к порту.
     let scancode: u8 = unsafe { port.read() };
 
+    // --- Обновление модификаторов ВСЕГДА, независимо от input_owner ---
+    // BUG FIX: раньше модификаторы не обновлялись в режиме Apps → глюки хоткеев.
+    // Используем AtomicBool (Ordering::Relaxed: ISR — единственный writer, CPU не кеширует).
+    match scancode {
+        0x38 => crate::shell::ALT_HELD.store(true,   Ordering::Relaxed),
+        0xB8 => crate::shell::ALT_HELD.store(false,  Ordering::Relaxed),
+        0x1D => crate::shell::CTRL_HELD.store(true,  Ordering::Relaxed),
+        0x9D => crate::shell::CTRL_HELD.store(false, Ordering::Relaxed),
+        0x2A | 0x36 => crate::shell::SHIFT_HELD.store(true,  Ordering::Relaxed),
+        0xAA | 0xB6 => crate::shell::SHIFT_HELD.store(false, Ordering::Relaxed),
+        _ => {}
+    }
+
+    // --- Если ввод принадлежит приложениям — пушим в очередь и выходим ---
     if crate::ps2::input_owner() == crate::ps2::InputOwner::Apps {
+        // CapsLock в режиме Apps: не шлём в shell, пушим как обычный scancode
         crate::ps2::push_scancode_from_irq(scancode);
-        // SAFETY: IRQ1 приходит с master PIC, достаточно прямого EOI.
-        unsafe {
-            notify_end_of_interrupt_raw(InterruptIndex::Keyboard);
-        }
+        unsafe { notify_end_of_interrupt_raw(InterruptIndex::Keyboard); }
         return;
     }
 
-    // SAFETY (ALT/CTRL/SHIFT): static mut bool — запись из ISR-контекста.
-    // Прерывания отключены пока мы в ISR (CPU отключает IF при входе).
-    // Единственный writer — этот ISR; читатели в lib.rs не конкурируют.
-
-    // Alt (Left Alt = 0x38): треким состояние для Alt+Fn хоткеев
-    if scancode == 0x38 {
-        unsafe { crate::shell::ALT_HELD = true; }
-    }
-    if scancode == 0xB8 {
-        unsafe { crate::shell::ALT_HELD = false; }
-    }
-
-    // Ctrl (Left Ctrl = 0x1D): треким для Ctrl+C/V/X/A
-    if scancode == 0x1D {
-        unsafe { crate::shell::CTRL_HELD = true; }
-    }
-    if scancode == 0x9D {
-        unsafe { crate::shell::CTRL_HELD = false; }
-    }
-
-    // Shift (Left = 0x2A, Right = 0x36): треким для Shift+стрелки
-    if scancode == 0x2A || scancode == 0x36 {
-        unsafe { crate::shell::SHIFT_HELD = true; }
-    }
-    if scancode == 0xAA || scancode == 0xB6 {
-        unsafe { crate::shell::SHIFT_HELD = false; }
-    }
+    // --- Режим Shell ---
 
     // CapsLock (0x3A) — перехватываем ДО pc-keyboard, чтобы не менял регистр
-    // Только нажатие (без бита 0x80), отпускание игнорируем
     if scancode == 0x3A {
         crate::shell::handle_raw_key(pc_keyboard::KeyCode::CapsLock);
-        // SAFETY: IRQ1 приходит с master PIC, достаточно прямого EOI.
-        unsafe {
-            notify_end_of_interrupt_raw(InterruptIndex::Keyboard);
-        }
+        unsafe { notify_end_of_interrupt_raw(InterruptIndex::Keyboard); }
         return;
     }
     if scancode == 0xBA { // 0x3A | 0x80 = отпускание CapsLock
-        // SAFETY: EOI — аналогично выше.
-        unsafe {
-            notify_end_of_interrupt_raw(InterruptIndex::Keyboard);
-        }
+        unsafe { notify_end_of_interrupt_raw(InterruptIndex::Keyboard); }
         return;
     }
 
+    let mut keyboard = KEYBOARD.lock();
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
         if let Some(key) = keyboard.process_keyevent(key_event) {
             match key {
@@ -349,9 +354,8 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
             }
         }
     }
+    drop(keyboard); // явный drop до EOI
 
     // SAFETY: EOI для IRQ1; без этого PIC не отправит следующее прерывание клавиатуры.
-    unsafe {
-        notify_end_of_interrupt_raw(InterruptIndex::Keyboard);
-    }
+    unsafe { notify_end_of_interrupt_raw(InterruptIndex::Keyboard); }
 }

@@ -25,7 +25,7 @@ impl Launcher {
         }
     }
 
-    const ITEMS_COUNT: usize = 7;
+    const ITEMS_COUNT: usize = 6;
 
     unsafe fn draw_border(&self) {
         let color = 0x0b;
@@ -90,8 +90,7 @@ impl Launcher {
             2 => "MATCH GRAB",
             3 => "DEBIL CARD",
             4 => "BYTE DODGE",
-            5 => "MODULE DEMO",
-            _ => "HALT SYSTEM",
+            _ => "MODULE DEMO",
         }
     }
 
@@ -102,8 +101,7 @@ impl Launcher {
             2 => "grab swap cascade repeat",
             3 => "yard card chaos simulator",
             4 => "new port with safe back handling",
-            5 => "module demo from apps/games",
-            _ => "freeze forever with honor",
+            _ => "module demo from apps/games",
         }
     }
 
@@ -205,10 +203,7 @@ impl Launcher {
                 let mut m = ModuleDemo::new();
                 m.run();
             }
-            _ => {
-                Self::transition_screen("HALT SYSTEM");
-                self.halt_screen();
-            }
+            _ => {}
         }
     }
 
@@ -235,12 +230,8 @@ impl Launcher {
                     menu_move_beep();
                 }
                 b'\n' | b' ' => {
-                    // Последний пункт = HALT SYSTEM (остаётся как есть)
-                    if self.selected == Self::ITEMS_COUNT - 1 {
-                        self.halt_screen();
-                    }
                     self.run_selected();
-                    // После игры — перерисовываем меню
+                    // After game returns — redraw menu
                 }
                 // Esc (0x1B) или Q = выход обратно в APPS-меню
                 0x1B | b'q' => {

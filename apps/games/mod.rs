@@ -11,13 +11,9 @@ pub mod byte_dodge;
 pub mod launcher;
 
 /// Lifecycle hooks — вызываются ActivityManager'ом.
-pub fn on_start() {
-    run();
-}
-
-pub fn on_resume() {
-    run();
-}
+/// Не запускают run() — это делает dispatch_update().
+pub fn on_start()  {}
+pub fn on_resume() {}
 
 /// Точка входа: запустить Games-меню. Возвращается в вызывающий код.
 pub fn run() {

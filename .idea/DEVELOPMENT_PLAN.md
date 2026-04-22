@@ -106,53 +106,66 @@
 | Шумерская клинопись | U+12000–U+123FF в Dynamic Glyph Cache |
 | Мышь PS/2 | Драйвер мыши |
 | Voodoo интерактивный Акинатор | Ввод да/нет через shell → Байесовский вывод |
-| NeroShizaScript VM | x87 FPU как стековая VM, опкоды NHS |
 | NHS Loader | Загрузчик .nhs пакетов без heap |
 
 ---
 
 ## 🗺️ ДОРОЖНАЯ КАРТА
 
-### BUGFIX: СТАБИЛИЗАЦИЯ APPS LAYER (СРОЧНО)
+### BUGFIX: СТАБИЛИЗАЦИЯ APPS LAYER (✅ ВЫПОЛНЕНО — 2026-04-19)
 
 **Цель:** привести `apps/` к одной модели выполнения: `ActivityManager` управляет стеком, а приложения не ломают lifecycle и не рисуют shell напрямую.
 
 #### B0.1 — Исправить выход из APPS в Shell
-- [ ] Убрать псевдо-activity `AppKind::Shell` как отдельный `Push`
-- [ ] Пункт `Shell` в `apps/launcher.rs` должен завершать `ActivityManager`, а не возвращать обратно в Launcher
-- [ ] После выхода из APPS: очистка экрана, `locale_badge`, возврат владения вводом в shell через `InputGuard::drop()`
+- [x] Убрать псевдо-activity `AppKind::Shell` как отдельный `Push`
+- [x] Пункт `Shell` в `apps/launcher.rs` должен завершать `ActivityManager`, а не возвращать обратно в Launcher
+- [x] После выхода из APPS: очистка экрана, `locale_badge`, возврат владения вводом в shell через `InputGuard::drop()`
+
+> **Реализация:** `Some(AppKind::Shell)` → `None` в ENTRIES. Pop → стек пустеет → `run_activity_manager()` завершается чисто.
 
 #### B0.2 — Починить lifecycle и двойной запуск Games
-- [ ] Убрать двойной запуск `apps::games::run()` из `on_start()/on_resume()` и `dispatch_update()`
-- [ ] Зафиксировать единый контракт: lifecycle только подготавливает экран и состояние, а запуск app-loop идёт в одном месте
-- [ ] Проверить аналогичный контракт для `Doom`, `Jackal`, `Menger`, `Locale`
+- [x] Убрать двойной запуск `apps::games::run()` из `on_start()/on_resume()` и `dispatch_update()`
+- [x] Зафиксировать единый контракт: lifecycle только подготавливает экран и состояние, а запуск app-loop идёт в одном месте
+- [x] Проверить аналогичный контракт для `Doom`, `Jackal`, `Menger`, `Locale`
+
+> **Реализация:** `on_start()` и `on_resume()` в `apps/games/mod.rs` → `{}`. Единственный вызов `run()` — в `dispatch_update(Games)`.
 
 #### B0.3 — Запретить прямые переходы apps → shell
-- [ ] Убрать `crate::print!("> ")` из leaf-apps (`menger`, будущие demo-модули)
-- [ ] Правило слоя: `apps/` никогда не рисует shell prompt и не вызывает shell API напрямую
-- [ ] Возврат к shell только через `ActivityIntent::Pop` и завершение `run_activity_manager()`
+- [x] Убрать `crate::print!("> ")` из leaf-apps (`menger`, будущие demo-модули)
+- [x] Правило слоя: `apps/` никогда не рисует shell prompt и не вызывает shell API напрямую
+- [x] Возврат к shell только через `ActivityIntent::Pop` и завершение `run_activity_manager()`
+
+> **Реализация:** Удалён `crate::print!("> ")` из `apps/menger/mod.rs::run_demo()`.
 
 #### B0.4 — Починить ввод PS/2 в приложениях
-- [ ] Запретить `read_scancode()` без предварительного `has_scancode()`
-- [ ] Проверить `menger`, `games/common_hw.rs`, `jackal`, `launcher`, `locale_switcher`, `doom/input.rs`
-- [ ] Для всех app-циклов: игнорировать key-up, не читать сырой порт 0x60 вне готовности OBF
+- [x] Запретить `read_scancode()` без предварительного `has_scancode()`
+- [x] Проверить `menger`, `games/common_hw.rs`, `jackal`, `launcher`, `locale_switcher`, `doom/input.rs`
+- [x] Для всех app-циклов: игнорировать key-up, не читать сырой порт 0x60 вне готовности OBF
+
+> **Реализация:** `menger::run_demo()` — дрейн через `while has_scancode()`, основной цикл `if has_scancode()` перед `read_scancode()`. `doom/input.rs` и `common_hw.rs` были уже корректны.
 
 #### B0.5 — Убрать опасные тупики в APPS
-- [ ] Пересмотреть `HALT SYSTEM` в `apps/games/launcher.rs`: либо удалить, либо вынести в явный debug-only режим
-- [ ] Не допускать вечных циклов в UI-приложениях, которые обходят `ActivityManager`
-- [ ] Любой выход из app должен либо вернуть `Pop`, либо выполнить контролируемый reboot/shutdown
+- [x] Пересмотреть `HALT SYSTEM` в `apps/games/launcher.rs`: удалён
+- [x] Не допускать вечных циклов в UI-приложениях, которые обходят `ActivityManager`
+- [x] Любой выход из app должен либо вернуть `Pop`, либо выполнить контролируемый reboot/shutdown
+
+> **Реализация:** `ITEMS_COUNT` 7→6, match-ветки для `HALT SYSTEM` удалены, `halt_screen()` больше не вызывается.
 
 #### B0.6 — Довести архитектуру ActivityStack до фактической реализации
-- [ ] Либо реализовать `NO_HISTORY`, `SINGLE_TOP`, `CLEAR_TOP`, `IntentExtras`, либо убрать их из публичной архитектуры до реального внедрения
-- [ ] Убрать расхождение между документацией и реальным поведением `apps/activity.rs`
-- [ ] После bugfix: обновить описание `ActivityManager` в этом плане по фактическому коду, без галлюцинаций
+- [x] Либо реализовать `NO_HISTORY`, `SINGLE_TOP`, `CLEAR_TOP`, `IntentExtras`, либо убрать их из публичной архитектуры до реального внедрения
+- [x] Убрать расхождение между документацией и реальным поведением `apps/activity.rs`
+- [x] После bugfix: обновить описание `ActivityManager` в этом плане по фактическому коду, без галлюцинаций
+
+> **Реализация:** Удалены `ActivityFlags` (NO_HISTORY/SINGLE_TOP/CLEAR_TOP), `IntentExtras`, `Slot.flags/extras`, `clear_all_but_bottom()`, SINGLE_TOP check, `AppKind::Shell` с lifecycle/dispatch. `push()` → `push(kind: AppKind)`. `AppKind::Nhs` перенумерован 13→12.
 
 **Критерий готовности bugfix-фазы:**
-- [ ] `Apps -> Shell` выходит стабильно за один шаг
-- [ ] `Games` не запускается дважды
-- [ ] Ни одно приложение в `apps/` не печатает shell prompt напрямую
-- [ ] Во всех app-циклах ввод читается только через безопасный шаблон `has_scancode() -> read_scancode()`
-- [ ] Поведение lifecycle совпадает с описанием в `DEVELOPMENT_PLAN.md`
+- [x] `Apps -> Shell` выходит стабильно за один шаг
+- [x] `Games` не запускается дважды
+- [x] Ни одно приложение в `apps/` не печатает shell prompt напрямую
+- [x] Во всех app-циклах ввод читается только через безопасный шаблон `has_scancode() -> read_scancode()`
+- [x] Поведение lifecycle совпадает с описанием в `DEVELOPMENT_PLAN.md`
+
+> `cargo check --quiet` → **Exit: 0** (2026-04-19)
 
 ### Фаза 0: APPS LAUNCHER — TUI-меню с курсором (✅ ГОТОВО)
 
@@ -172,7 +185,7 @@
 - [x] `apps/jackal/` — анализатор и архиватор
 - [x] `apps/activity.rs` — ActivityStack, lifecycle (on_start/pause/resume/destroy)
 - [x] `InputGuard` — захват PS/2 на время работы ActivityManager, возврат через Drop
-- [x] Shell как пункт меню → `AppKind::Shell` (реализовано: Pop → возврат в hlt_loop)
+- [x] Shell как пункт меню → `AppKind::Shell` **удалён**; выход через `Pop` из Launcher (пункт `None`) → возврат в hlt_loop
 
 #### 0.3 — Главный цикл ActivityManager (описание архитектуры)
 
@@ -348,7 +361,7 @@ text
 .nhs файл
   ├── [MANIFEST]  имя, автор, версия, флаги
   ├── [CODE]      скомпилированный Rust/asm (бинарный app)
-  └── [SCR]       NeroShizaScript байткод (x87 VM скрипт)
+  └── [SCR]       NeroShizaScript байткод (интерактивные демо)
 Один и тот же файл может быть и приложением и скриптом одновременно — лончер запускает то, что есть.
 
 Структура файла .nhs
@@ -414,6 +427,49 @@ static GAME_BYTE_DODGE: &[u8] = include_bytes!("../packages/byte_dodge.nhs");
 static DOOM_FIRE:        &[u8] = include_bytes!("../packages/doom_fire.nhs");
 static JACKAL:           &[u8] = include_bytes!("../packages/jackal.nhs");
 Лончер читает APP_REGISTRY, грузит манифест каждого → показывает имя/автора/тип в меню (динамически, вместо текущего хардкода ENTRIES).
+
+Фаза OTA-1: SERIAL OVER-THE-AIR УСТАНОВКА .NHS (Ближайшая)
+Цель: установка `.nhs` пакетов в уже работающее ядро через COM1 / QEMU TCP Serial без файловой системы, без heap и без пересборки BIOS-образа.
+
+OTA-1.1 — Единый storage-контракт
+- [ ] Зафиксировать, что слот хранит полный `.nhs` blob, а не только `CODE/RODATA/DATA`
+- [ ] Убрать расхождение между `installer` и `runtime`: запуск должен читать header/manifest/lump directory из того же blob, который был установлен
+- [ ] `registry.installed_size` должен отражать размер полного пакета
+
+> Причина: payload-only install ломает модель запуска — runtime ожидает полный `.nhs` blob.
+
+OTA-1.2 — Serial transport поверх COM1
+- [ ] Канонический handshake: `NHS_SYNC` → `NHS_READY` → `[u32 LE: size]` → `blob` → `NHS_OK | NHS_ERR`
+- [ ] Первая версия остаётся без heap и без resume; лимит пакета `<= 64 KB`
+- [ ] Все ошибки приёма должны завершаться детерминированно: timeout, bad magic, CRC mismatch, oversize
+
+> Реализация: `apps/installer/serial_recv.rs`, `tools/send_nhs.py`
+
+OTA-1.3 — Shell UX
+- [ ] Основная команда: `install serial`
+- [ ] `listen` допустим только как короткий алиас, без отдельной архитектурной ветки
+- [ ] Help и usage должны показывать один канонический workflow host ↔ guest
+
+OTA-1.4 — QEMU / Debug port split
+- [ ] Serial bridge вынести на `4321`
+- [ ] GDB stub оставить на `1234`
+- [ ] Обновить `run.bat`, `debug.bat`, shell help и Python sender
+
+> Причина: `1234` уже занят GDB-режимом, поэтому serial OTA и debug не должны делить один сокет.
+
+OTA-1.5 — Launcher и runtime
+- [ ] Launcher продолжает читать только `registry`
+- [ ] `ActivityManager` запускает `AppKind::Nhs` из выбранного slot
+- [ ] Runtime сам определяет тип пакета по `FLAG_HAS_SCRIPT` / будущему `FLAG_HAS_NATIVE`
+
+> Реализация: `apps/launcher.rs`, `apps/activity.rs`, `apps/installer/runtime.rs`
+
+Критерий готовности OTA-1:
+- [ ] `.nhs` можно отправить в QEMU без пересборки ядра
+- [ ] Установщик пишет полный blob в slot
+- [ ] Пакет появляется в launcher через `registry`
+- [ ] Пакет запускается из slot без повторной упаковки данных
+- [ ] `--debug` не конфликтует с serial OTA
 
 Динамическая загрузка (Фаза 2: из RAM-диска)
 Когда появится RAM-disk или TFTP загрузка — NHS Loader читает из буфера, не из include_bytes!.
@@ -511,7 +567,7 @@ LOOP_START      # while ST(0) > 0
   DUP
   PRINT
 LOOP_END
-NHS Script VM в Rust:
+NHS Script в Rust:
 
 rust
 // apps/nhs/vm.rs
@@ -570,10 +626,6 @@ apps/nhs/lump.rs — #[repr(C, packed)] struct LumpEntry (16 bytes) + LumpType e
 apps/nhs/loader.rs — NhsLoader::load(&[u8]) -> Result<AppHandle, NhsError>
 
 apps/nhs/crc32.rs — CRC32 table-lookup (без heap, 1KB таблица в .rodata)
-
-NeroShizaScript VM:
-
-apps/nhs/vm.rs — NhsVm::run(bytecode) — диспетчер опкодов
 
 apps/nhs/opcodes.rs — enum Opcode + таблица декодирования
 
@@ -829,9 +881,7 @@ PC Speaker: простые эффекты (выстрел, дверь, смер�
 
 Статистика и ИИ на уровне железа — Байес + Шеннон + x87 FPU = VoodooEngine
 
-Свой язык с вероятностями — стековый язык с комбинаторикой, x87 как VM
-
-Три режима — одно железо — x86-64 (ядро) + x86-32 (Mode 13h) + x87 FPU (VM) работают в унисон
+Три режима — одно железо — x86-64 (ядро) + x86-32 (Mode 13h) + x87 FPU работают в унисон
 
 Три слоя системы (Hybrid OS = ядро + менеджер активностей + приложения)
 Слой	Где живёт	Что содержит
@@ -911,7 +961,7 @@ text
 [КРИТИЧНО]  Интеграция shell → ActivityManager (замкнуть цикл)
 [ВЫСОКО]    Дописать lifecycle для Games/Doom/Jackal (on_pause/on_resume)
 [ВЫСОКО]    Фаза NHS: Loader (header, crc32, loader) — фундамент для .nhs
-[ВЫСОКО]    Фаза NHS: NeroShizaScript VM (первые 5 опкодов: PUSH, ADD, PRINT)
+[ВЫСОКО]    Фаза NHS: NeroShizaScript (первые 5 опкодов: PUSH, ADD, PRINT)
 [СРЕДНЕ]    Рефакторинг R1 (уже сделан?) — codepoint_to_vga_byte()
 [СРЕДНЕ]    Фаза 2 — Многоязычность (USP проекта)
 [СРЕДНЕ]    Фаза 3 — Intent Engine (команды на всех языках)
@@ -1099,11 +1149,11 @@ SHIZA (Шиза): абсолютная творческая свобода. Пс
 
 Статистика и ИИ на уровне железа — Байес + Шеннон + x87 FPU = VoodooEngine (Акинатор)
 
-Свой язык с вероятностями — NeroShizaScript: x87 как VM, P_IF через RDRAND
+NeroShizaScript: x87, P_IF через RDRAND
 
 Хаос в именах, порядок в коде — лор безумный, структура строгая
 
-Три режима — один кристалл — x86-64 (ядро) + x86-32 (Mode 13h) + x87 FPU (VM)
+Три режима — один кристалл — x86-64 (ядро) + x86-32 (Mode 13h) + x87 FPU
 
 Институт Бреда и Помешательства (И.Б.И.П.) — Юрисдикция Психотаун
 NeroShiza Records — Лейбл цифрового абсурда
