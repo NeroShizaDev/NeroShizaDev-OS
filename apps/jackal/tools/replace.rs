@@ -19,7 +19,7 @@
 
 /// Одно правило замены (аналог элемента JSON-массива в replace_text.py)
 pub struct Rule<'a> {
-    pub find:    &'a [u8],
+    pub find: &'a [u8],
     pub replace: &'a [u8],
 }
 
@@ -68,7 +68,7 @@ pub fn replace_all(src: &[u8], dst: &mut [u8], rules: &[Rule]) -> (usize, u32) {
 
 /// Однократный проход замены одного паттерна.
 fn replace_one(src: &[u8], dst: &mut [u8], rule: &Rule) -> (usize, u32) {
-    let find    = rule.find;
+    let find = rule.find;
     let replace = rule.replace;
 
     if find.is_empty() {
@@ -79,13 +79,11 @@ fn replace_one(src: &[u8], dst: &mut [u8], rule: &Rule) -> (usize, u32) {
 
     let mut src_pos = 0usize;
     let mut dst_pos = 0usize;
-    let mut reps    = 0u32;
+    let mut reps = 0u32;
 
     while src_pos < src.len() && dst_pos < dst.len() {
         // Ищем совпадение начиная с src_pos
-        if src_pos + find.len() <= src.len()
-            && &src[src_pos..src_pos + find.len()] == find
-        {
+        if src_pos + find.len() <= src.len() && &src[src_pos..src_pos + find.len()] == find {
             // Копируем replace
             let copy = replace.len().min(dst.len() - dst_pos);
             dst[dst_pos..dst_pos + copy].copy_from_slice(&replace[..copy]);
@@ -108,7 +106,9 @@ fn replace_one(src: &[u8], dst: &mut [u8], rule: &Rule) -> (usize, u32) {
 /// Аналог Python: [m.start() for m in re.finditer(pattern, text)]
 /// Записывает до `max_hits` позиций в `out`. Возвращает количество найденных.
 pub fn find_all(data: &[u8], pattern: &[u8], out: &mut [usize], max_hits: usize) -> usize {
-    if pattern.is_empty() || data.len() < pattern.len() { return 0; }
+    if pattern.is_empty() || data.len() < pattern.len() {
+        return 0;
+    }
 
     let mut count = 0usize;
     let mut i = 0usize;
@@ -125,4 +125,3 @@ pub fn find_all(data: &[u8], pattern: &[u8], out: &mut [usize], max_hits: usize)
 
     count
 }
-

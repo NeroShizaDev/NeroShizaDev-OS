@@ -1,7 +1,7 @@
 // ============================================================
 // ТРОЙНОЕ ВРЕМЯ + ТРИГОНОМЕТРИЧЕСКИЕ ЧАСЫ
 // ============================================================
-// 1. Человеческое — из RTC (уже есть в rtc.rs)  
+// 1. Человеческое — из RTC (уже есть в rtc.rs)
 // 2. Шестнадцатеричное — сырые регистры CMOS в hex
 // 3. Психотаунское (Мир 100) — 100 дней в месяце, 1200 дней в году
 // 4. Тригочасы — время как угол на тригонометрическом круге
@@ -37,7 +37,11 @@ fn days_since_epoch(year: u16, month: u8, day: u8) -> u32 {
     let mut total: u32 = 0;
     // Полные годы
     for y in 2000..year {
-        total += if (y % 4 == 0) && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        total += if (y % 4 == 0) && (y % 100 != 0 || y % 400 == 0) {
+            366
+        } else {
+            365
+        };
     }
     // Полные месяцы текущего года
     for m in 1..month {
@@ -52,8 +56,8 @@ fn days_since_epoch(year: u16, month: u8, day: u8) -> u32 {
 
 /// Дата в Мире 100
 pub struct PsychotownDate {
-    pub day: u8,    // 0..99
-    pub month: u8,  // 1..12
+    pub day: u8,   // 0..99
+    pub month: u8, // 1..12
     pub year: u32,
     pub total_days: u32,
 }
@@ -113,7 +117,10 @@ pub fn display_hex_time() {
 
         crate::locale::print_localized_fmt(
             0x0E,
-            format_args!("  0x{:02X}:0x{:02X}:0x{:02X}  0x{:02X}.0x{:02X}.0x20{:02X}", hour, min, sec, day, month, year),
+            format_args!(
+                "  0x{:02X}:0x{:02X}:0x{:02X}  0x{:02X}.0x{:02X}.0x20{:02X}",
+                hour, min, sec, day, month, year
+            ),
         );
     }
 }
@@ -214,7 +221,11 @@ fn radical_name(val10000: i64) -> &'static str {
         return "0";
     }
     if abs_val > 600 && abs_val < 3500 {
-        if neg { return "-(0..1/2)" } else { return "(0..1/2)" }
+        if neg {
+            return "-(0..1/2)";
+        } else {
+            return "(0..1/2)";
+        }
     }
     if abs_val >= 3500 && abs_val < 5600 {
         if neg { return "-1/2" } else { return "1/2" }
@@ -261,11 +272,29 @@ pub fn display_trig_clock() {
     crate::user_messages::print_chronos_angle(deg_whole, deg_frac);
     let sin_sign = if sin_val < 0 { "-" } else { "" };
     let sin_abs = if sin_val < 0 { -sin_val } else { sin_val };
-    crate::locale::print_localized_fmt(0x0E, format_args!("  sin = {}{}.{:02}  [{}]", sin_sign, sin_abs / 10000, (sin_abs % 10000) / 100, sin_radical));
+    crate::locale::print_localized_fmt(
+        0x0E,
+        format_args!(
+            "  sin = {}{}.{:02}  [{}]",
+            sin_sign,
+            sin_abs / 10000,
+            (sin_abs % 10000) / 100,
+            sin_radical
+        ),
+    );
 
     let cos_sign = if cos_val < 0 { "-" } else { "" };
     let cos_abs = if cos_val < 0 { -cos_val } else { cos_val };
-    crate::locale::print_localized_fmt(0x0E, format_args!("  cos = {}{}.{:02}  [{}]", cos_sign, cos_abs / 10000, (cos_abs % 10000) / 100, cos_radical));
+    crate::locale::print_localized_fmt(
+        0x0E,
+        format_args!(
+            "  cos = {}{}.{:02}  [{}]",
+            cos_sign,
+            cos_abs / 10000,
+            (cos_abs % 10000) / 100,
+            cos_radical
+        ),
+    );
     crate::user_messages::print_chronos_roots(sin_radical, cos_radical);
 }
 
@@ -305,7 +334,10 @@ pub fn display_triple_time() {
     );
     crate::locale::print_localized_fmt(
         0x0E,
-        format_args!("  {:02}:{:02}:{:02}  {:02}.{:02}.{}", dt.hours, dt.minutes, dt.seconds, dt.day, dt.month, dt.year),
+        format_args!(
+            "  {:02}:{:02}:{:02}  {:02}.{:02}.{}",
+            dt.hours, dt.minutes, dt.seconds, dt.day, dt.month, dt.year
+        ),
     );
 
     // 2. Шестнадцатеричное (сырые регистры CMOS)
@@ -323,7 +355,10 @@ pub fn display_triple_time() {
     );
     crate::locale::print_localized_fmt(
         0x0E,
-        format_args!("  {:02}.{:02}.{:04}  ({} days since 2000 epoch)", p.day, p.month, p.year, p.total_days),
+        format_args!(
+            "  {:02}.{:02}.{:04}  ({} days since 2000 epoch)",
+            p.day, p.month, p.year, p.total_days
+        ),
     );
     crate::locale::print_localized_line(
         crate::user_messages::current(crate::user_messages::UiText::ChronosPsychotownHint),

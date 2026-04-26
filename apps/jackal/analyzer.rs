@@ -63,13 +63,13 @@ pub enum FileKind {
 impl FileKind {
     pub fn short(self) -> &'static str {
         match self {
-            FileKind::Text       => "TEXT",
+            FileKind::Text => "TEXT",
             FileKind::Executable => "EXEC",
             FileKind::Compressed => "COMP",
-            FileKind::Random     => "RAND",
+            FileKind::Random => "RAND",
             FileKind::Structured => "STRC",
             FileKind::LossyMedia => "MEDIA",
-            FileKind::Unknown    => "?",
+            FileKind::Unknown => "?",
         }
     }
 }
@@ -89,39 +89,75 @@ pub struct MagicHit {
 /// ищутся по всему образцу как вторичные маркеры.
 static MAGIC_TABLE: &[(usize, &[u8], &str, FileKind)] = &[
     // PE / DOS executable
-    (0x00, b"MZ",        "DOS/PE header",      FileKind::Executable),
+    (0x00, b"MZ", "DOS/PE header", FileKind::Executable),
     // ELF
-    (0x00, &[0x7F, b'E', b'L', b'F'], "ELF",   FileKind::Executable),
+    (0x00, &[0x7F, b'E', b'L', b'F'], "ELF", FileKind::Executable),
     // Mach-O (32 и 64 bit, little endian)
-    (0x00, &[0xCE, 0xFA, 0xED, 0xFE], "Mach-O 32", FileKind::Executable),
-    (0x00, &[0xCF, 0xFA, 0xED, 0xFE], "Mach-O 64", FileKind::Executable),
+    (
+        0x00,
+        &[0xCE, 0xFA, 0xED, 0xFE],
+        "Mach-O 32",
+        FileKind::Executable,
+    ),
+    (
+        0x00,
+        &[0xCF, 0xFA, 0xED, 0xFE],
+        "Mach-O 64",
+        FileKind::Executable,
+    ),
     // Archives / compressed
-    (0x00, &[b'P', b'K', 0x03, 0x04], "ZIP/JAR/DOCX", FileKind::Compressed),
-    (0x00, &[0x1F, 0x8B],             "GZIP",          FileKind::Compressed),
-    (0x00, &[0xFD, b'7', b'z', b'X', b'Z'], "XZ",      FileKind::Compressed),
-    (0x00, &[b'7', b'z', 0xBC, 0xAF, 0x27, 0x1C], "7Z", FileKind::Compressed),
-    (0x00, b"Rar!",                   "RAR",           FileKind::Compressed),
+    (
+        0x00,
+        &[b'P', b'K', 0x03, 0x04],
+        "ZIP/JAR/DOCX",
+        FileKind::Compressed,
+    ),
+    (0x00, &[0x1F, 0x8B], "GZIP", FileKind::Compressed),
+    (
+        0x00,
+        &[0xFD, b'7', b'z', b'X', b'Z'],
+        "XZ",
+        FileKind::Compressed,
+    ),
+    (
+        0x00,
+        &[b'7', b'z', 0xBC, 0xAF, 0x27, 0x1C],
+        "7Z",
+        FileKind::Compressed,
+    ),
+    (0x00, b"Rar!", "RAR", FileKind::Compressed),
     // Images
-    (0x00, &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A], "PNG", FileKind::Structured),
-    (0x00, &[0xFF, 0xD8, 0xFF],       "JPEG",          FileKind::LossyMedia),
-    (0x00, b"GIF8",                   "GIF",           FileKind::Structured),
-    (0x00, b"BM",                     "BMP",           FileKind::Structured),
+    (
+        0x00,
+        &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A],
+        "PNG",
+        FileKind::Structured,
+    ),
+    (0x00, &[0xFF, 0xD8, 0xFF], "JPEG", FileKind::LossyMedia),
+    (0x00, b"GIF8", "GIF", FileKind::Structured),
+    (0x00, b"BM", "BMP", FileKind::Structured),
     // Media containers
-    (0x00, b"RIFF",                   "RIFF (WAV/AVI)", FileKind::Structured),
-    (0x00, b"OggS",                   "OGG",           FileKind::LossyMedia),
-    (0x04, b"ftyp",                   "MP4/ISOBMFF",   FileKind::LossyMedia),
+    (0x00, b"RIFF", "RIFF (WAV/AVI)", FileKind::Structured),
+    (0x00, b"OggS", "OGG", FileKind::LossyMedia),
+    (0x04, b"ftyp", "MP4/ISOBMFF", FileKind::LossyMedia),
     // PDF
-    (0x00, b"%PDF",                   "PDF",           FileKind::Structured),
+    (0x00, b"%PDF", "PDF", FileKind::Structured),
     // UTF-8 BOM
-    (0x00, &[0xEF, 0xBB, 0xBF],       "UTF-8 BOM",     FileKind::Text),
+    (0x00, &[0xEF, 0xBB, 0xBF], "UTF-8 BOM", FileKind::Text),
 ];
 
 /// Ищет первое совпадение магии в шапке данных.
 pub fn sniff_magic(data: &[u8]) -> Option<MagicHit> {
     for &(offset, bytes, name, kind) in MAGIC_TABLE {
-        if data.len() < offset + bytes.len() { continue; }
+        if data.len() < offset + bytes.len() {
+            continue;
+        }
         if &data[offset..offset + bytes.len()] == bytes {
-            return Some(MagicHit { offset, name, kind_hint: kind });
+            return Some(MagicHit {
+                offset,
+                name,
+                kind_hint: kind,
+            });
         }
     }
     None
@@ -137,7 +173,10 @@ pub struct Histogram {
 
 impl Histogram {
     pub fn new() -> Self {
-        Self { counts: [0; ALPHABET], total: 0 }
+        Self {
+            counts: [0; ALPHABET],
+            total: 0,
+        }
     }
 
     pub fn feed(&mut self, data: &[u8]) {
@@ -150,7 +189,9 @@ impl Histogram {
     /// Shannon entropy × 1000 (чтобы без float на выходе).
     /// Использует x87 FPU fyl2x — в духе всего ядра.
     pub fn shannon_milli(&self) -> u64 {
-        if self.total == 0 { return 0; }
+        if self.total == 0 {
+            return 0;
+        }
         let len = self.total;
 
         // H = log2(len) − (1/len) · Σ count·log2(count)
@@ -176,7 +217,10 @@ impl Histogram {
             // Вставка в отсортированный список (убывание по count)
             let mut pos = K;
             for (j, slot) in out.iter().enumerate() {
-                if c > slot.1 { pos = j; break; }
+                if c > slot.1 {
+                    pos = j;
+                    break;
+                }
             }
             if pos < K {
                 // сдвиг
@@ -194,7 +238,9 @@ impl Histogram {
     pub fn unique_count(&self) -> u32 {
         let mut n = 0u32;
         for &c in &self.counts {
-            if c > 0 { n += 1; }
+            if c > 0 {
+                n += 1;
+            }
         }
         n
     }
@@ -202,7 +248,9 @@ impl Histogram {
     /// Доля «печатных» ASCII (0x20..0x7E + \t \n \r).
     /// × 1000 чтобы без float. Text > 950, код < 400, random ~370.
     pub fn printable_ratio_milli(&self) -> u32 {
-        if self.total == 0 { return 0; }
+        if self.total == 0 {
+            return 0;
+        }
         let mut printable: u64 = 0;
         for i in 0x20..=0x7E {
             printable += self.counts[i] as u64;
@@ -215,7 +263,9 @@ impl Histogram {
 
     /// Доля нулевых байтов × 1000. EXE/структурные файлы часто > 100.
     pub fn zero_ratio_milli(&self) -> u32 {
-        if self.total == 0 { return 0; }
+        if self.total == 0 {
+            return 0;
+        }
         ((self.counts[0] as u64 * 1000) / self.total) as u32
     }
 }
@@ -231,7 +281,7 @@ impl Histogram {
 // Скачки H = границы секций. Это и есть структурный сигнал.
 // ============================================================
 pub struct BlockProfile {
-    pub milli: [u16; MAX_BLOCKS],   // H × 1000, 0..8000
+    pub milli: [u16; MAX_BLOCKS], // H × 1000, 0..8000
     pub block_count: usize,
     pub file_size: u64,
 }
@@ -243,7 +293,9 @@ impl BlockProfile {
             block_count: 0,
             file_size: data.len() as u64,
         };
-        if data.is_empty() { return prof; }
+        if data.is_empty() {
+            return prof;
+        }
 
         let total_blocks = (data.len() + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
@@ -261,7 +313,9 @@ impl BlockProfile {
             for i in 0..MAX_BLOCKS {
                 let offset = i * step * BLOCK_SIZE;
                 let end = (offset + BLOCK_SIZE).min(data.len());
-                if offset >= data.len() { break; }
+                if offset >= data.len() {
+                    break;
+                }
                 let mut h = Histogram::new();
                 h.feed(&data[offset..end]);
                 prof.milli[i] = h.shannon_milli().min(8000) as u16;
@@ -278,20 +332,28 @@ impl BlockProfile {
         for i in 1..self.block_count {
             let a = self.milli[i - 1] as i32;
             let b = self.milli[i] as i32;
-            if (a - b).abs() > 1500 { n += 1; }
+            if (a - b).abs() > 1500 {
+                n += 1;
+            }
         }
         n
     }
 
     /// Максимум и минимум H по блокам.
     pub fn range(&self) -> (u16, u16) {
-        if self.block_count == 0 { return (0, 0); }
+        if self.block_count == 0 {
+            return (0, 0);
+        }
         let mut mn = u16::MAX;
         let mut mx = 0u16;
         for i in 0..self.block_count {
             let v = self.milli[i];
-            if v < mn { mn = v; }
-            if v > mx { mx = v; }
+            if v < mn {
+                mn = v;
+            }
+            if v > mx {
+                mx = v;
+            }
         }
         (mn, mx)
     }
@@ -318,19 +380,28 @@ pub struct AutocorrProfile {
 
 impl AutocorrProfile {
     pub fn build(data: &[u8]) -> Self {
-        let mut out = Self { match_bp: [0; 10], len: AUTOCORR_PERIODS.len() };
-        if data.len() < 16 { return out; }
+        let mut out = Self {
+            match_bp: [0; 10],
+            len: AUTOCORR_PERIODS.len(),
+        };
+        if data.len() < 16 {
+            return out;
+        }
 
         // Семпл: до 64 КБ — полный, больше — семплируем
         let sample_len = data.len().min(64 * 1024);
         let sample = &data[..sample_len];
 
         for (i, &p) in AUTOCORR_PERIODS.iter().enumerate() {
-            if sample.len() <= p { continue; }
+            if sample.len() <= p {
+                continue;
+            }
             let mut hits: u64 = 0;
             let mut total: u64 = 0;
             for j in 0..(sample.len() - p) {
-                if sample[j] == sample[j + p] { hits += 1; }
+                if sample[j] == sample[j + p] {
+                    hits += 1;
+                }
                 total += 1;
             }
             if total > 0 {
@@ -367,7 +438,7 @@ pub struct Report {
     pub profile: BlockProfile,
     pub autocorr: AutocorrProfile,
     pub classification: FileKind,
-    pub confidence_milli: u32,  // 0..1000
+    pub confidence_milli: u32, // 0..1000
 }
 
 /// Главная функция анализа.
@@ -429,16 +500,26 @@ fn classify(
         let base_conf = match m.kind_hint {
             FileKind::Executable => {
                 // Для EXE ждём: средняя H 5-7, широкий span, много переходов
-                if h_milli > 4000 && profile_span > 1000 && transitions > 0 { 900 }
-                else { 700 }
+                if h_milli > 4000 && profile_span > 1000 && transitions > 0 {
+                    900
+                } else {
+                    700
+                }
             }
             FileKind::Compressed => {
                 // Для сжатого ждём: H > 7.5, плоский профиль
-                if h_milli > 7500 && profile_span < 500 { 950 }
-                else { 700 }
+                if h_milli > 7500 && profile_span < 500 {
+                    950
+                } else {
+                    700
+                }
             }
             FileKind::Text => {
-                if printable_bp > 900 { 900 } else { 600 }
+                if printable_bp > 900 {
+                    900
+                } else {
+                    600
+                }
             }
             _ => 800,
         };
@@ -459,7 +540,8 @@ fn classify(
     if h_milli > 7500 && flat {
         // Различаем compressed от random по автокорреляции на периоде 1
         // (compressed всё же имеет капельку структуры, random — нет)
-        if best_corr < 420 {  // ≈ 1/256 × 10000 + небольшой допуск
+        if best_corr < 420 {
+            // ≈ 1/256 × 10000 + небольшой допуск
             return (FileKind::Random, 700);
         } else {
             return (FileKind::Compressed, 750);
@@ -492,19 +574,21 @@ pub fn to_voodoo_priors(report: &Report) -> [f32; 6] {
     let mut priors = [base; 6];
 
     let idx = match report.classification {
-        FileKind::Text       => Some(0),
+        FileKind::Text => Some(0),
         FileKind::Executable => Some(1),
         FileKind::Compressed => Some(2),
-        FileKind::Random     => Some(3),
+        FileKind::Random => Some(3),
         FileKind::Structured => Some(4),
         FileKind::LossyMedia => Some(5),
-        FileKind::Unknown    => None,
+        FileKind::Unknown => None,
     };
     if let Some(i) = idx {
         priors[i] = base + conf;
     } else {
         // Unknown → равномерно
-        for p in &mut priors { *p = 1.0 / 6.0; }
+        for p in &mut priors {
+            *p = 1.0 / 6.0;
+        }
     }
     priors
 }

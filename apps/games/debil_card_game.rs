@@ -22,7 +22,13 @@ pub struct DebilGame {
 
 impl DebilGame {
     pub const fn empty_card() -> Card {
-        Card { suit: 0, rank: 0, is_joker: false, is_red: false, active: false }
+        Card {
+            suit: 0,
+            rank: 0,
+            is_joker: false,
+            is_red: false,
+            active: false,
+        }
     }
 
     pub const fn new() -> Self {
@@ -45,17 +51,32 @@ impl DebilGame {
             let mut rank = 0;
             while rank < 13 {
                 self.deck[self.deck_len] = Card {
-                    suit, rank, is_joker: false,
-                    is_red: suit < 2, active: true,
+                    suit,
+                    rank,
+                    is_joker: false,
+                    is_red: suit < 2,
+                    active: true,
                 };
                 self.deck_len += 1;
                 rank += 1;
             }
             suit += 1;
         }
-        self.deck[self.deck_len] = Card { suit: 4, rank: 99, is_joker: true, is_red: true,  active: true };
+        self.deck[self.deck_len] = Card {
+            suit: 4,
+            rank: 99,
+            is_joker: true,
+            is_red: true,
+            active: true,
+        };
         self.deck_len += 1;
-        self.deck[self.deck_len] = Card { suit: 5, rank: 99, is_joker: true, is_red: false, active: true };
+        self.deck[self.deck_len] = Card {
+            suit: 5,
+            rank: 99,
+            is_joker: true,
+            is_red: false,
+            active: true,
+        };
         self.deck_len += 1;
     }
 
@@ -71,25 +92,37 @@ impl DebilGame {
     }
 
     pub unsafe fn pop_card(&mut self) -> Card {
-        if self.deck_len == 0 { return Self::empty_card(); }
+        if self.deck_len == 0 {
+            return Self::empty_card();
+        }
         self.deck_len -= 1;
         self.deck[self.deck_len]
     }
 
     pub unsafe fn hand_push(&mut self, player: usize, card: Card) {
         let idx = self.hand_len[player];
-        if idx < 12 { self.hands[player][idx] = card; self.hand_len[player] += 1; }
+        if idx < 12 {
+            self.hands[player][idx] = card;
+            self.hand_len[player] += 1;
+        }
     }
 
     pub unsafe fn start_game(&mut self) {
         self.create_deck();
         self.shuffle();
         let mut i = 0;
-        while i < 3 { self.hand_len[i] = 0; i += 1; }
+        while i < 3 {
+            self.hand_len[i] = 0;
+            i += 1;
+        }
         let mut p = 0;
         while p < 3 {
             let mut c = 0;
-            while c < 6 { let card = self.pop_card(); self.hand_push(p, card); c += 1; }
+            while c < 6 {
+                let card = self.pop_card();
+                self.hand_push(p, card);
+                c += 1;
+            }
             p += 1;
         }
         let trump = self.pop_card();
@@ -100,14 +133,31 @@ impl DebilGame {
     }
 
     unsafe fn suit_char(suit: u8) -> u8 {
-        match suit { 0 => b'H', 1 => b'D', 2 => b'C', 3 => b'S', _ => b'J' }
+        match suit {
+            0 => b'H',
+            1 => b'D',
+            2 => b'C',
+            3 => b'S',
+            _ => b'J',
+        }
     }
 
     unsafe fn rank_char(rank: u8) -> u8 {
         match rank {
-            0 => b'2', 1 => b'3', 2 => b'4', 3 => b'5', 4 => b'6',
-            5 => b'7', 6 => b'8', 7 => b'9', 8 => b'T', 9 => b'J',
-            10 => b'Q', 11 => b'K', 12 => b'A', _ => b'*',
+            0 => b'2',
+            1 => b'3',
+            2 => b'4',
+            3 => b'5',
+            4 => b'6',
+            5 => b'7',
+            6 => b'8',
+            7 => b'9',
+            8 => b'T',
+            9 => b'J',
+            10 => b'Q',
+            11 => b'K',
+            12 => b'A',
+            _ => b'*',
         }
     }
 
@@ -158,8 +208,9 @@ impl DebilGame {
         loop {
             self.display();
             let ch = read_key_blocking();
-            if ch == b'q' { break; }
+            if ch == b'q' {
+                break;
+            }
         }
     }
 }
-

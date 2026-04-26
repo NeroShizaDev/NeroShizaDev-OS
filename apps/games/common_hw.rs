@@ -13,7 +13,7 @@ use x86_64::instructions::hlt;
 // ============================================================
 // VGA размеры
 // ============================================================
-pub const VGA_WIDTH:  usize = 80;
+pub const VGA_WIDTH: usize = 80;
 pub const VGA_HEIGHT: usize = 25;
 
 // Текущая позиция «курсора» для print-функций
@@ -25,10 +25,12 @@ static mut VGA_ROW: usize = 0;
 /// # Safety
 /// VGA text buffer identity-mapped загрузчиком. x, y должны быть в [0,VGA_WIDTH) × [0,VGA_HEIGHT).
 pub unsafe fn write_vga_cell(x: usize, y: usize, byte: u8, color: u8) {
-    if x >= VGA_WIDTH || y >= VGA_HEIGHT { return; }
+    if x >= VGA_WIDTH || y >= VGA_HEIGHT {
+        return;
+    }
     let vga = 0xB8000 as *mut u8;
     let offset = (y * VGA_WIDTH + x) * 2;
-    *vga.add(offset)     = byte;
+    *vga.add(offset) = byte;
     *vga.add(offset + 1) = color;
 }
 
@@ -39,7 +41,7 @@ pub unsafe fn write_vga_cell(x: usize, y: usize, byte: u8, color: u8) {
 pub unsafe fn clear_screen(color: u8) {
     let vga = 0xB8000 as *mut u8;
     for i in 0..(VGA_WIDTH * VGA_HEIGHT) {
-        *vga.add(i * 2)     = b' ';
+        *vga.add(i * 2) = b' ';
         *vga.add(i * 2 + 1) = color;
     }
     VGA_COL = 0;
@@ -52,17 +54,19 @@ unsafe fn scroll_up() {
     for row in 0..(VGA_HEIGHT - 1) {
         for col in 0..VGA_WIDTH {
             let src = ((row + 1) * VGA_WIDTH + col) * 2;
-            let dst = (row       * VGA_WIDTH + col) * 2;
-            *vga.add(dst)     = *vga.add(src);
+            let dst = (row * VGA_WIDTH + col) * 2;
+            *vga.add(dst) = *vga.add(src);
             *vga.add(dst + 1) = *vga.add(src + 1);
         }
     }
     for col in 0..VGA_WIDTH {
         let offset = ((VGA_HEIGHT - 1) * VGA_WIDTH + col) * 2;
-        *vga.add(offset)     = b' ';
+        *vga.add(offset) = b' ';
         *vga.add(offset + 1) = 0x07;
     }
-    if VGA_ROW > 0 { VGA_ROW -= 1; }
+    if VGA_ROW > 0 {
+        VGA_ROW -= 1;
+    }
 }
 
 /// Выводит один байт (символ) с цветом в текущую позицию.
@@ -70,7 +74,9 @@ pub unsafe fn put_byte(b: u8, color: u8) {
     if b == b'\n' {
         VGA_COL = 0;
         VGA_ROW += 1;
-        if VGA_ROW >= VGA_HEIGHT { scroll_up(); }
+        if VGA_ROW >= VGA_HEIGHT {
+            scroll_up();
+        }
         return;
     }
     write_vga_cell(VGA_COL, VGA_ROW, b, color);
@@ -78,13 +84,17 @@ pub unsafe fn put_byte(b: u8, color: u8) {
     if VGA_COL >= VGA_WIDTH {
         VGA_COL = 0;
         VGA_ROW += 1;
-        if VGA_ROW >= VGA_HEIGHT { scroll_up(); }
+        if VGA_ROW >= VGA_HEIGHT {
+            scroll_up();
+        }
     }
 }
 
 /// Выводит строку байтов.
 pub unsafe fn print(s: &str, color: u8) {
-    for b in s.as_bytes() { put_byte(*b, color); }
+    for b in s.as_bytes() {
+        put_byte(*b, color);
+    }
 }
 
 /// Выводит строку с переводом строки.
@@ -95,7 +105,10 @@ pub unsafe fn print_line(s: &str, color: u8) {
 
 /// Выводит u32 в десятичном виде.
 pub unsafe fn print_u32(n: u32, color: u8) {
-    if n == 0 { put_byte(b'0', color); return; }
+    if n == 0 {
+        put_byte(b'0', color);
+        return;
+    }
     let mut buf = [0u8; 10];
     let mut i = 10usize;
     let mut v = n;
@@ -104,12 +117,17 @@ pub unsafe fn print_u32(n: u32, color: u8) {
         buf[i] = b'0' + (v % 10) as u8;
         v /= 10;
     }
-    for j in i..10 { put_byte(buf[j], color); }
+    for j in i..10 {
+        put_byte(buf[j], color);
+    }
 }
 
 /// Выводит u64 в десятичном виде.
 pub unsafe fn print_u64(n: u64, color: u8) {
-    if n == 0 { put_byte(b'0', color); return; }
+    if n == 0 {
+        put_byte(b'0', color);
+        return;
+    }
     let mut buf = [0u8; 20];
     let mut i = 20usize;
     let mut v = n;
@@ -118,7 +136,9 @@ pub unsafe fn print_u64(n: u64, color: u8) {
         buf[i] = b'0' + (v % 10) as u8;
         v /= 10;
     }
-    for j in i..20 { put_byte(buf[j], color); }
+    for j in i..20 {
+        put_byte(buf[j], color);
+    }
 }
 
 /// Обновляет аппаратный курсор VGA.
@@ -162,7 +182,9 @@ pub unsafe fn rdtsc() -> u64 {
 pub unsafe fn delay_cycles(n: u64) {
     let start = rdtsc();
     loop {
-        if rdtsc().wrapping_sub(start) >= n { break; }
+        if rdtsc().wrapping_sub(start) >= n {
+            break;
+        }
     }
 }
 
@@ -205,7 +227,9 @@ pub unsafe fn outb(port: u16, val: u8) {
 // ============================================================
 pub unsafe fn speaker_on() {
     let val = inb(0x61);
-    if (val & 0x03) != 0x03 { outb(0x61, val | 0x03); }
+    if (val & 0x03) != 0x03 {
+        outb(0x61, val | 0x03);
+    }
 }
 
 pub unsafe fn speaker_off() {
@@ -214,7 +238,10 @@ pub unsafe fn speaker_off() {
 }
 
 pub unsafe fn speaker_set_freq(freq: u32) {
-    if freq == 0 { speaker_off(); return; }
+    if freq == 0 {
+        speaker_off();
+        return;
+    }
     let div = 1_193_180 / freq;
     outb(0x43, 0xB6);
     outb(0x42, (div & 0xFF) as u8);
@@ -228,7 +255,9 @@ pub unsafe fn beep(freq: u32, cycles: u64) {
     speaker_off();
 }
 
-pub unsafe fn menu_move_beep() { beep(880, 4_000_000); }
+pub unsafe fn menu_move_beep() {
+    beep(880, 4_000_000);
+}
 
 pub unsafe fn menu_launch_beep() {
     beep(660, 6_000_000);
@@ -239,15 +268,61 @@ pub unsafe fn menu_launch_beep() {
 // ============================================================
 // PS/2 клавиатура
 // ============================================================
+/// Специальные коды для стрелок (расширенные scancodes 0xe0+).
+/// Используются в read_key_blocking_ext().
+pub const KEY_UP: u8 = 0xE8; // ↑
+pub const KEY_DOWN: u8 = 0xE9; // ↓
+pub const KEY_LEFT: u8 = 0xEA; // ←
+pub const KEY_RIGHT: u8 = 0xEB; // →
+
 /// Блокирующее чтение одного ASCII-символа с клавиатуры.
 /// Игнорирует события отпускания клавиш (sc & 0x80).
 pub unsafe fn read_key_blocking() -> u8 {
     loop {
+        match read_key_blocking_ext() {
+            KEY_UP => return b'w',
+            KEY_DOWN => return b's',
+            KEY_LEFT => return b'a',
+            KEY_RIGHT => return b'd',
+            0 => {}
+            ascii => return ascii,
+        }
+    }
+}
+
+/// Блокирующее чтение клавиши с поддержкой стрелок.
+/// Стрелки возвращают KEY_UP / KEY_DOWN / KEY_LEFT / KEY_RIGHT.
+/// Остальные клавиши — ASCII как в read_key_blocking().
+pub unsafe fn read_key_blocking_ext() -> u8 {
+    loop {
         if crate::ps2::has_scancode() {
             let sc = crate::ps2::read_scancode();
-            if sc & 0x80 != 0 { continue; } // key release
+            if sc & 0x80 != 0 {
+                continue;
+            } // key release
+            if sc == 0xe0 {
+                // ждём следующий байт extended scancode
+                loop {
+                    if crate::ps2::has_scancode() {
+                        let sc2 = crate::ps2::read_scancode();
+                        if sc2 & 0x80 != 0 {
+                            continue;
+                        }
+                        return match sc2 {
+                            0x48 => KEY_UP,
+                            0x50 => KEY_DOWN,
+                            0x4B => KEY_LEFT,
+                            0x4D => KEY_RIGHT,
+                            _ => 0,
+                        };
+                    }
+                    hlt();
+                }
+            }
             let ascii = scancode_to_ascii(sc);
-            if ascii != 0 { return ascii; }
+            if ascii != 0 {
+                return ascii;
+            }
         }
         hlt();
     }
@@ -276,16 +351,39 @@ pub unsafe fn poll_input() -> GameInput {
         return GameInput::None;
     }
 
+    // Extended scancode prefix — читаем второй байт сразу
+    if sc == 0xe0 {
+        // poll второй байт если уже есть
+        if crate::ps2::has_scancode() {
+            let sc2 = crate::ps2::read_scancode();
+            if sc2 & 0x80 != 0 {
+                return GameInput::None;
+            }
+            return match sc2 {
+                0x48 => GameInput::Up,
+                0x50 => GameInput::Down,
+                0x4B => GameInput::Left,
+                0x4D => GameInput::Right,
+                _ => GameInput::None,
+            };
+        }
+        return GameInput::None;
+    }
+
     match sc {
-        0x01 | 0x10 => GameInput::Back, // Esc or Q
-        0x11 | 0x48 => GameInput::Up,   // W or arrow up (if mapped as set-1)
-        0x1F | 0x50 => GameInput::Down, // S or arrow down
-        0x1E | 0x4B => GameInput::Left, // A or arrow left
-        0x20 | 0x4D => GameInput::Right, // D or arrow right
+        0x01 | 0x10 => GameInput::Back,    // Esc or Q
+        0x11 | 0x48 => GameInput::Up,      // W or ↑
+        0x1F | 0x50 => GameInput::Down,    // S or ↓
+        0x1E | 0x4B => GameInput::Left,    // A or ←
+        0x20 | 0x4D => GameInput::Right,   // D or →
         0x1C | 0x39 => GameInput::Confirm, // Enter or Space
         _ => {
             let ascii = scancode_to_ascii(sc);
-            if ascii == 0 { GameInput::None } else { GameInput::Char(ascii) }
+            if ascii == 0 {
+                GameInput::None
+            } else {
+                GameInput::Char(ascii)
+            }
         }
     }
 }
@@ -320,24 +418,48 @@ fn scancode_to_ascii(sc: u8) -> u8 {
     match sc {
         0x01 => b'\x1B', // Esc
         // Цифры
-        0x02 => b'1', 0x03 => b'2', 0x04 => b'3', 0x05 => b'4',
-        0x06 => b'5', 0x07 => b'6', 0x08 => b'7', 0x09 => b'8',
-        0x0A => b'9', 0x0B => b'0',
+        0x02 => b'1',
+        0x03 => b'2',
+        0x04 => b'3',
+        0x05 => b'4',
+        0x06 => b'5',
+        0x07 => b'6',
+        0x08 => b'7',
+        0x09 => b'8',
+        0x0A => b'9',
+        0x0B => b'0',
         // Enter / Space
         0x1C => b'\n',
         0x39 => b' ',
         // Верхний ряд
-        0x10 => b'q', 0x11 => b'w', 0x12 => b'e', 0x13 => b'r',
-        0x14 => b't', 0x15 => b'y', 0x16 => b'u', 0x17 => b'i',
-        0x18 => b'o', 0x19 => b'p',
+        0x10 => b'q',
+        0x11 => b'w',
+        0x12 => b'e',
+        0x13 => b'r',
+        0x14 => b't',
+        0x15 => b'y',
+        0x16 => b'u',
+        0x17 => b'i',
+        0x18 => b'o',
+        0x19 => b'p',
         // Средний ряд
-        0x1E => b'a', 0x1F => b's', 0x20 => b'd', 0x21 => b'f',
-        0x22 => b'g', 0x23 => b'h', 0x24 => b'j', 0x25 => b'k',
+        0x1E => b'a',
+        0x1F => b's',
+        0x20 => b'd',
+        0x21 => b'f',
+        0x22 => b'g',
+        0x23 => b'h',
+        0x24 => b'j',
+        0x25 => b'k',
         0x26 => b'l',
         // Нижний ряд
-        0x2C => b'z', 0x2D => b'x', 0x2E => b'c', 0x2F => b'v',
-        0x30 => b'b', 0x31 => b'n', 0x32 => b'm',
+        0x2C => b'z',
+        0x2D => b'x',
+        0x2E => b'c',
+        0x2F => b'v',
+        0x30 => b'b',
+        0x31 => b'n',
+        0x32 => b'm',
         _ => 0,
     }
 }
-

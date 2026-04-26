@@ -1,6 +1,6 @@
 // Логотип загрузки — ASCII-арт "no_mangle" в стиле FNAF
 
-use crate::vga_buffer::{WRITER, Color, ColorCode};
+use crate::vga_buffer::{Color, ColorCode, WRITER};
 
 pub fn show_boot_logo() {
     // Рисуем красным цветом запрещающий знак

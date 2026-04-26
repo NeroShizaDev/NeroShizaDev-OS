@@ -3,7 +3,6 @@
 /// Все прямые обращения к портам должны идти через `safe_outb()` / `safe_inb()`.
 /// Запрещённые порты: HDD (0x1F0-0x1F7), IDE (0x170), PCI config (0xCF8-0xCFF).
 /// При нарушении — MODULE_ABANDON (лог в serial, продолжить работу).
-
 use x86_64::instructions::port::{Port, PortReadOnly};
 
 // ── Белый список разрешённых диапазонов портов ──────────────────────────────
@@ -67,7 +66,9 @@ pub fn safe_outb(port: u16, value: u8) -> bool {
             // MODULE_ABANDON: логируем нарушение в serial, продолжаем
             crate::serial_println!(
                 "[PORT FIREWALL] DENIED outb(0x{:04X}, 0x{:02X}) — {} [MODULE_ABANDON]",
-                port, value, name
+                port,
+                value,
+                name
             );
             false
         }
@@ -86,7 +87,8 @@ pub fn safe_inb(port: u16) -> Option<u8> {
         PortAccess::Denied(name) => {
             crate::serial_println!(
                 "[PORT FIREWALL] DENIED inb(0x{:04X}) — {} [MODULE_ABANDON]",
-                port, name
+                port,
+                name
             );
             None
         }
@@ -99,8 +101,8 @@ pub fn safe_inb(port: u16) -> Option<u8> {
 /// Диагностика: вывести статус порта.
 pub fn port_status(port: u16) -> &'static str {
     match check_port(port) {
-        PortAccess::Allowed     => "ALLOWED",
-        PortAccess::Denied(_)   => "DENIED",
-        PortAccess::Unknown     => "UNKNOWN (unlisted)",
+        PortAccess::Allowed => "ALLOWED",
+        PortAccess::Denied(_) => "DENIED",
+        PortAccess::Unknown => "UNKNOWN (unlisted)",
     }
 }

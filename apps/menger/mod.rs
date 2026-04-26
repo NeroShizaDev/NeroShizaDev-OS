@@ -19,9 +19,15 @@ static SHADE: &[u8] = b" .,:;+*%#@";
 // Fixed-point: *1024
 const FP: i64 = 1024;
 
-fn iabs(x: i64) -> i64 { if x < 0 { -x } else { x } }
-fn imax(a: i64, b: i64) -> i64 { if a > b { a } else { b } }
-fn imin(a: i64, b: i64) -> i64 { if a < b { a } else { b } }
+fn iabs(x: i64) -> i64 {
+    if x < 0 { -x } else { x }
+}
+fn imax(a: i64, b: i64) -> i64 {
+    if a > b { a } else { b }
+}
+fn imin(a: i64, b: i64) -> i64 {
+    if a < b { a } else { b }
+}
 
 // ============================================================
 // Menger Sponge Distance Estimator (Inigo Quilez)
@@ -70,7 +76,9 @@ fn normal(x: i64, y: i64, z: i64) -> (i64, i64, i64) {
 // ============================================================
 
 fn isqrt(val: i64) -> i64 {
-    if val <= 0 { return 0; }
+    if val <= 0 {
+        return 0;
+    }
     let mut x = val;
     let mut y = (x + 1) / 2;
     while y < x {
@@ -163,7 +171,10 @@ fn render(angle: i64) {
             let len = isqrt(len2);
             if len == 0 {
                 let off = (row * W + col) * 2;
-                unsafe { *vga.add(off) = b' '; *vga.add(off + 1) = 0; }
+                unsafe {
+                    *vga.add(off) = b' ';
+                    *vga.add(off + 1) = 0;
+                }
                 continue;
             }
             let ndx = dx * FP / len;
@@ -184,7 +195,9 @@ fn render(angle: i64) {
                     hit = true;
                     break;
                 }
-                if t > FP * 10 { break; }
+                if t > FP * 10 {
+                    break;
+                }
                 let step = if d < 5 { 5 } else { d };
                 px += ndx * step / FP;
                 py += ndy * step / FP;
@@ -202,7 +215,13 @@ fn render(angle: i64) {
                     // dot(normal, light)
                     let dot = (nx * lx + ny * ly + nz * lz) / nlen;
                     // clamp к [0, FP]
-                    let clamped = if dot < 0 { 0 } else if dot > FP { FP } else { dot };
+                    let clamped = if dot < 0 {
+                        0
+                    } else if dot > FP {
+                        FP
+                    } else {
+                        dot
+                    };
                     // Ambient 20% + diffuse 80%
                     (FP / 5) + clamped * 4 / 5
                 } else {
@@ -248,7 +267,9 @@ pub fn run_demo() {
 
     // B0.4: drain pending scancodes safely before entering the render loop
     unsafe {
-        while crate::ps2::has_scancode() { crate::ps2::read_scancode(); }
+        while crate::ps2::has_scancode() {
+            crate::ps2::read_scancode();
+        }
     }
 
     let mut angle: i64 = 0;
@@ -257,13 +278,17 @@ pub fn run_demo() {
         render(angle);
 
         angle += 30; // ~1.7° за кадр
-        if angle > 6434 { angle -= 6434; }
+        if angle > 6434 {
+            angle -= 6434;
+        }
 
         // B0.4: exit on any key-down, ignoring key-up events
         unsafe {
             if crate::ps2::has_scancode() {
                 let sc = crate::ps2::read_scancode();
-                if sc & 0x80 == 0 { break; } // key-down → exit
+                if sc & 0x80 == 0 {
+                    break;
+                } // key-down → exit
             }
             crate::ps2::wait_vblank();
         }

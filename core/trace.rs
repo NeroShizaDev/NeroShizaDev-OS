@@ -1,5 +1,5 @@
-use x86_64::instructions::interrupts;
 use core::sync::atomic::{AtomicBool, Ordering};
+use x86_64::instructions::interrupts;
 
 const TRACE_DEPTH: usize = 8;
 

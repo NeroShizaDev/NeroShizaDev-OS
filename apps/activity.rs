@@ -14,7 +14,6 @@
 ///                         on_destroy()
 ///
 /// The Activity Manager IS the main loop. Shell is the bottom of the stack.
-
 use x86_64::instructions::hlt;
 
 // ── Activity intent ───────────────────────────────────────────────────────────
@@ -40,19 +39,19 @@ pub enum ActivityIntent {
 #[repr(u8)]
 pub enum AppKind {
     Launcher = 0,
-    Games    = 1,
-    Doom     = 2,
-    Jackal   = 3,
-    Menger   = 4,
-    Voodoo   = 5,
-    Chronos  = 6,
-    Rtc      = 7,
-    Rng      = 8,
-    Beeper   = 9,
-    Fpu      = 10,
-    Locale   = 11,
+    Games = 1,
+    Calculator = 2,
+    Jackal = 3,
+    Menger = 4,
+    Voodoo = 5,
+    Chronos = 6,
+    Rtc = 7,
+    Rng = 8,
+    Beeper = 9,
+    Fpu = 10,
+    Locale = 11,
     /// NHS installed app — run NeroShizaScript from slot LAUNCH_NHS_SLOT.
-    Nhs      = 12,
+    Nhs = 12,
 }
 
 // ── Stack slot ────────────────────────────────────────────────────────────────
@@ -67,7 +66,7 @@ const MAX_DEPTH: usize = 16;
 
 struct ActivityStack {
     slots: [Option<Slot>; MAX_DEPTH],
-    len:   usize,
+    len: usize,
 }
 
 impl ActivityStack {
@@ -76,107 +75,124 @@ impl ActivityStack {
         // Use MaybeUninit-free trick: init with None manually.
         Self {
             slots: [
-                None, None, None, None, None, None, None, None,
-                None, None, None, None, None, None, None, None,
+                None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+                None, None,
             ],
             len: 0,
         }
     }
 
     fn push(&mut self, kind: AppKind) {
-        if self.len >= MAX_DEPTH { return; }
+        if self.len >= MAX_DEPTH {
+            return;
+        }
         self.slots[self.len] = Some(Slot { kind });
         self.len += 1;
     }
 
     fn pop(&mut self) -> Option<Slot> {
-        if self.len == 0 { return None; }
+        if self.len == 0 {
+            return None;
+        }
         self.len -= 1;
         self.slots[self.len].take()
     }
 
     fn top(&self) -> Option<&Slot> {
-        if self.len == 0 { None } else { self.slots[self.len - 1].as_ref() }
+        if self.len == 0 {
+            None
+        } else {
+            self.slots[self.len - 1].as_ref()
+        }
     }
 
     fn top_kind(&self) -> Option<AppKind> {
         self.top().map(|s| s.kind)
     }
 
-    fn is_empty(&self) -> bool { self.len == 0 }
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
 
-    fn depth(&self) -> usize { self.len }
+    fn depth(&self) -> usize {
+        self.len
+    }
 }
 
 // ── Lifecycle dispatch ────────────────────────────────────────────────────────
 
-enum Lifecycle { Start, Pause, Resume, Destroy }
+enum Lifecycle {
+    Start,
+    Pause,
+    Resume,
+    Destroy,
+}
 
 fn dispatch_lifecycle(kind: AppKind, ev: Lifecycle) {
     match (kind, ev) {
-        (AppKind::Launcher, Lifecycle::Start)   => crate::apps::launcher::on_start(),
-        (AppKind::Launcher, Lifecycle::Resume)  => crate::apps::launcher::on_resume(),
-        (AppKind::Launcher, Lifecycle::Pause)   => crate::apps::launcher::on_pause(),
+        (AppKind::Launcher, Lifecycle::Start) => crate::apps::launcher::on_start(),
+        (AppKind::Launcher, Lifecycle::Resume) => crate::apps::launcher::on_resume(),
+        (AppKind::Launcher, Lifecycle::Pause) => crate::apps::launcher::on_pause(),
         (AppKind::Launcher, Lifecycle::Destroy) => {}
 
-        (AppKind::Games,  Lifecycle::Start)   => {}
-        (AppKind::Games,  Lifecycle::Resume)  => {}
-        (AppKind::Games,  Lifecycle::Pause)   => {}
-        (AppKind::Games,  Lifecycle::Destroy) => {}
+        (AppKind::Games, Lifecycle::Start) => {}
+        (AppKind::Games, Lifecycle::Resume) => {}
+        (AppKind::Games, Lifecycle::Pause) => {}
+        (AppKind::Games, Lifecycle::Destroy) => {}
 
-        (AppKind::Doom,   Lifecycle::Start)   => { crate::doom::init(&[]); }
-        (AppKind::Doom,   Lifecycle::Resume)  => {}   // Doom redraws on first update()
-        (AppKind::Doom,   Lifecycle::Pause)   => {}
-        (AppKind::Doom,   Lifecycle::Destroy) => crate::doom::on_destroy(),
+        (AppKind::Calculator, Lifecycle::Start) => {}
+        (AppKind::Calculator, Lifecycle::Resume) => {}
+        (AppKind::Calculator, Lifecycle::Pause) => {}
+        (AppKind::Calculator, Lifecycle::Destroy) => {}
 
-        (AppKind::Jackal, Lifecycle::Start)   => {}
-        (AppKind::Jackal, Lifecycle::Resume)  => {}
-        (AppKind::Jackal, Lifecycle::Pause)   => {}
+        (AppKind::Jackal, Lifecycle::Start) => {}
+        (AppKind::Jackal, Lifecycle::Resume) => {}
+        (AppKind::Jackal, Lifecycle::Pause) => {}
         (AppKind::Jackal, Lifecycle::Destroy) => {}
 
-        (AppKind::Menger,  Lifecycle::Start)   => {}
-        (AppKind::Menger,  Lifecycle::Resume)  => {}
-        (AppKind::Menger,  Lifecycle::Pause)   => {}
-        (AppKind::Menger,  Lifecycle::Destroy) => {}
+        (AppKind::Menger, Lifecycle::Start) => {}
+        (AppKind::Menger, Lifecycle::Resume) => {}
+        (AppKind::Menger, Lifecycle::Pause) => {}
+        (AppKind::Menger, Lifecycle::Destroy) => {}
 
-        (AppKind::Voodoo,  Lifecycle::Start)   => {}
-        (AppKind::Voodoo,  Lifecycle::Resume)  => {}
-        (AppKind::Voodoo,  Lifecycle::Pause)   => {}
-        (AppKind::Voodoo,  Lifecycle::Destroy) => {}
+        (AppKind::Voodoo, Lifecycle::Start) => {}
+        (AppKind::Voodoo, Lifecycle::Resume) => {}
+        (AppKind::Voodoo, Lifecycle::Pause) => {}
+        (AppKind::Voodoo, Lifecycle::Destroy) => {}
 
-        (AppKind::Chronos, Lifecycle::Start)   => {}
-        (AppKind::Chronos, Lifecycle::Resume)  => {}
-        (AppKind::Chronos, Lifecycle::Pause)   => {}
+        (AppKind::Chronos, Lifecycle::Start) => {}
+        (AppKind::Chronos, Lifecycle::Resume) => {}
+        (AppKind::Chronos, Lifecycle::Pause) => {}
         (AppKind::Chronos, Lifecycle::Destroy) => {}
 
-        (AppKind::Rtc,     Lifecycle::Start)   => {}
-        (AppKind::Rtc,     Lifecycle::Resume)  => {}
-        (AppKind::Rtc,     Lifecycle::Pause)   => {}
-        (AppKind::Rtc,     Lifecycle::Destroy) => {}
+        (AppKind::Rtc, Lifecycle::Start) => {}
+        (AppKind::Rtc, Lifecycle::Resume) => {}
+        (AppKind::Rtc, Lifecycle::Pause) => {}
+        (AppKind::Rtc, Lifecycle::Destroy) => {}
 
-        (AppKind::Rng,     Lifecycle::Start)   => {}
-        (AppKind::Rng,     Lifecycle::Resume)  => {}
-        (AppKind::Rng,     Lifecycle::Pause)   => {}
-        (AppKind::Rng,     Lifecycle::Destroy) => {}
+        (AppKind::Rng, Lifecycle::Start) => {}
+        (AppKind::Rng, Lifecycle::Resume) => {}
+        (AppKind::Rng, Lifecycle::Pause) => {}
+        (AppKind::Rng, Lifecycle::Destroy) => {}
 
-        (AppKind::Beeper,  Lifecycle::Start)   => {}
-        (AppKind::Beeper,  Lifecycle::Resume)  => {}
-        (AppKind::Beeper,  Lifecycle::Pause)   => {}
-        (AppKind::Beeper,  Lifecycle::Destroy) => {}
+        (AppKind::Beeper, Lifecycle::Start) => {}
+        (AppKind::Beeper, Lifecycle::Resume) => {}
+        (AppKind::Beeper, Lifecycle::Pause) => {}
+        (AppKind::Beeper, Lifecycle::Destroy) => {}
 
-        (AppKind::Fpu,     Lifecycle::Start)   => {}
-        (AppKind::Fpu,     Lifecycle::Resume)  => {}
-        (AppKind::Fpu,     Lifecycle::Pause)   => {}
-        (AppKind::Fpu,     Lifecycle::Destroy) => {}
+        (AppKind::Fpu, Lifecycle::Start) => {}
+        (AppKind::Fpu, Lifecycle::Resume) => {}
+        (AppKind::Fpu, Lifecycle::Pause) => {}
+        (AppKind::Fpu, Lifecycle::Destroy) => {}
 
-        (AppKind::Locale,  Lifecycle::Start)   => crate::apps::locale_switcher::on_start(),
-        (AppKind::Locale,  Lifecycle::Resume)  => crate::apps::locale_switcher::on_resume(),
-        (AppKind::Locale,  Lifecycle::Pause)   => crate::apps::locale_switcher::on_pause(),
-        (AppKind::Locale,  Lifecycle::Destroy) => {}
+        (AppKind::Locale, Lifecycle::Start) => crate::apps::locale_switcher::on_start(),
+        (AppKind::Locale, Lifecycle::Resume) => crate::apps::locale_switcher::on_resume(),
+        (AppKind::Locale, Lifecycle::Pause) => crate::apps::locale_switcher::on_pause(),
+        (AppKind::Locale, Lifecycle::Destroy) => {}
 
-        (AppKind::Nhs, Lifecycle::Start)   => {}
-        (AppKind::Nhs, Lifecycle::Resume)  => {}
-        (AppKind::Nhs, Lifecycle::Pause)   => {}
+        (AppKind::Nhs, Lifecycle::Start) => {}
+        (AppKind::Nhs, Lifecycle::Resume) => {}
+        (AppKind::Nhs, Lifecycle::Pause) => {}
         (AppKind::Nhs, Lifecycle::Destroy) => {}
     }
 }
@@ -185,44 +201,59 @@ fn dispatch_lifecycle(kind: AppKind, ev: Lifecycle) {
 fn dispatch_update(kind: AppKind, depth: usize) -> ActivityIntent {
     match kind {
         AppKind::Launcher => crate::apps::launcher::update(depth),
-        AppKind::Games    => { crate::apps::games::run();                            ActivityIntent::Pop }
-        AppKind::Doom     => { crate::doom::run();                                   ActivityIntent::Pop }
-        AppKind::Jackal   => { crate::apps::jackal::shell::run_demo();               ActivityIntent::Pop }
-        AppKind::Menger   => { crate::menger::run_demo();                            ActivityIntent::Pop }
-        AppKind::Voodoo   => {
+        AppKind::Games => {
+            crate::apps::games::run();
+            ActivityIntent::Pop
+        }
+        AppKind::Calculator => {
+            crate::apps::calculator::run();
+            ActivityIntent::Pop
+        }
+        AppKind::Jackal => {
+            crate::apps::jackal::shell::run_demo();
+            ActivityIntent::Pop
+        }
+        AppKind::Menger => {
+            crate::menger::run_demo();
+            ActivityIntent::Pop
+        }
+        AppKind::Voodoo => {
             crate::vga_buffer::clear_screen();
             crate::voodoo_math::demo_cellular_automaton();
             wait_key();
             ActivityIntent::Pop
         }
-        AppKind::Chronos  => {
+        AppKind::Chronos => {
             crate::vga_buffer::clear_screen();
             crate::chronos::display_triple_time();
             wait_key();
             ActivityIntent::Pop
         }
-        AppKind::Rtc      => {
+        AppKind::Rtc => {
             crate::vga_buffer::clear_screen();
             crate::rtc::display_status();
             wait_key();
             ActivityIntent::Pop
         }
-        AppKind::Rng      => {
+        AppKind::Rng => {
             crate::vga_buffer::clear_screen();
             crate::rng::demo();
             wait_key();
             ActivityIntent::Pop
         }
-        AppKind::Beeper   => {
+        AppKind::Beeper => {
             crate::vga_buffer::clear_screen();
             crate::beeper::demo_hex_scale();
             wait_key();
             ActivityIntent::Pop
         }
-        AppKind::Fpu      => { crate::fpu::demo();                                   ActivityIntent::Pop }
-        AppKind::Locale   => crate::apps::locale_switcher::update(depth),
+        AppKind::Fpu => {
+            crate::fpu::demo();
+            ActivityIntent::Pop
+        }
+        AppKind::Locale => crate::apps::locale_switcher::update(depth),
         // NHS: run the NeroShizaScript stored in LAUNCH_NHS_SLOT, then pop.
-        AppKind::Nhs      => {
+        AppKind::Nhs => {
             let slot = unsafe { crate::apps::launcher::LAUNCH_NHS_SLOT as usize };
             crate::apps::installer::runtime::run_slot(slot);
             ActivityIntent::Pop
@@ -240,31 +271,43 @@ pub fn run_activity_manager() {
     dispatch_lifecycle(AppKind::Launcher, Lifecycle::Start);
 
     loop {
+        crate::ps2::flush_debug_serial(64);
         let depth = stack.depth();
-        let kind  = match stack.top_kind() { Some(k) => k, None => break };
+        let kind = match stack.top_kind() {
+            Some(k) => k,
+            None => break,
+        };
 
         let intent = dispatch_update(kind, depth);
 
         match intent {
-            ActivityIntent::Continue => { hlt(); }
+            ActivityIntent::Continue => {
+                hlt();
+            }
 
             ActivityIntent::Pop => {
+                crate::serial_println!("[APP] exit  {:?}", kind);
                 dispatch_lifecycle(kind, Lifecycle::Destroy);
                 stack.pop();
-                if stack.is_empty() { break; }
+                if stack.is_empty() {
+                    break;
+                }
 
                 // Resume whatever is now on top
                 let resumed = stack.top_kind().unwrap();
+                crate::serial_println!("[APP] resume {:?}", resumed);
                 dispatch_lifecycle(resumed, Lifecycle::Resume);
             }
 
             ActivityIntent::Push(next) => {
+                crate::serial_println!("[APP] launch {:?}", next);
                 dispatch_lifecycle(kind, Lifecycle::Pause);
                 stack.push(next);
                 dispatch_lifecycle(next, Lifecycle::Start);
             }
 
             ActivityIntent::Replace(next) => {
+                crate::serial_println!("[APP] replace {:?} -> {:?}", kind, next);
                 dispatch_lifecycle(kind, Lifecycle::Destroy);
                 stack.pop();
                 stack.push(next);
@@ -302,44 +345,44 @@ impl Drop for InputGuard {
 // ── Public utility ────────────────────────────────────────────────────────────
 
 pub struct ActivityDebugStats {
-    pub current:   AppKind,
-    pub depth:     usize,
+    pub current: AppKind,
+    pub depth: usize,
     pub max_depth: usize,
-    pub updates:   u32,
-    pub switches:  u32,
-    pub pushes:    u32,
-    pub replaces:  u32,
-    pub pops:      u32,
+    pub updates: u32,
+    pub switches: u32,
+    pub pushes: u32,
+    pub replaces: u32,
+    pub pops: u32,
 }
 
 pub fn debug_stats() -> ActivityDebugStats {
     ActivityDebugStats {
-        current:   AppKind::Launcher,
-        depth:     0,
+        current: AppKind::Launcher,
+        depth: 0,
         max_depth: 0,
-        updates:   0,
-        switches:  0,
-        pushes:    0,
-        replaces:  0,
-        pops:      0,
+        updates: 0,
+        switches: 0,
+        pushes: 0,
+        replaces: 0,
+        pops: 0,
     }
 }
 
 pub fn app_kind_name(k: AppKind) -> &'static str {
     match k {
         AppKind::Launcher => "Launcher",
-        AppKind::Games    => "Games",
-        AppKind::Doom     => "Doom",
-        AppKind::Jackal   => "Jackal",
-        AppKind::Menger   => "Menger",
-        AppKind::Voodoo   => "Voodoo",
-        AppKind::Chronos  => "Chronos",
-        AppKind::Rtc      => "Rtc",
-        AppKind::Rng      => "Rng",
-        AppKind::Beeper   => "Beeper",
-        AppKind::Fpu      => "Fpu",
-        AppKind::Locale   => "Locale",
-        AppKind::Nhs      => "Nhs",
+        AppKind::Games => "Games",
+        AppKind::Calculator => "Calculator",
+        AppKind::Jackal => "Jackal",
+        AppKind::Menger => "Menger",
+        AppKind::Voodoo => "Voodoo",
+        AppKind::Chronos => "Chronos",
+        AppKind::Rtc => "Rtc",
+        AppKind::Rng => "Rng",
+        AppKind::Beeper => "Beeper",
+        AppKind::Fpu => "Fpu",
+        AppKind::Locale => "Locale",
+        AppKind::Nhs => "Nhs",
     }
 }
 
@@ -348,7 +391,9 @@ pub fn wait_key() {
         loop {
             if crate::ps2::has_scancode() {
                 let sc = crate::ps2::read_scancode();
-                if sc & 0x80 == 0 { break; }
+                if sc & 0x80 == 0 {
+                    break;
+                }
             }
             hlt();
         }

@@ -31,7 +31,11 @@ impl CrystalMatchGame {
 
     unsafe fn crystal_char(id: u8) -> u8 {
         match id {
-            1 => b'D', 2 => b'F', 3 => b'W', 4 => b'A', _ => b'S',
+            1 => b'D',
+            2 => b'F',
+            3 => b'W',
+            4 => b'A',
+            _ => b'S',
         }
     }
 
@@ -50,7 +54,9 @@ impl CrystalMatchGame {
     pub unsafe fn init(&mut self) {
         loop {
             self.generate_grid();
-            if self.find_matches_count() == 0 { break; }
+            if self.find_matches_count() == 0 {
+                break;
+            }
         }
     }
 
@@ -96,25 +102,36 @@ impl CrystalMatchGame {
     }
 
     pub unsafe fn grab_crystal(&mut self, x: usize, y: usize) -> bool {
-        if x >= self.size || y >= self.size || self.has_held { return false; }
+        if x >= self.size || y >= self.size || self.has_held {
+            return false;
+        }
         self.held_crystal = self.grid[y][x];
-        self.held_x = x; self.held_y = y;
+        self.held_x = x;
+        self.held_y = y;
         self.grid[y][x] = 0;
         self.has_held = true;
         true
     }
 
     pub unsafe fn swap_crystal(&mut self, x: usize, y: usize) -> bool {
-        if !self.has_held || x >= self.size || y >= self.size { return false; }
-        if x == self.held_x && y == self.held_y { return false; }
-        if self.grid[y][x] == 0 { return false; }
+        if !self.has_held || x >= self.size || y >= self.size {
+            return false;
+        }
+        if x == self.held_x && y == self.held_y {
+            return false;
+        }
+        if self.grid[y][x] == 0 {
+            return false;
+        }
         let target = self.grid[y][x];
         self.grid[y][x] = self.held_crystal;
         self.grid[self.held_y][self.held_x] = target;
         self.has_held = false;
         let had = self.check_and_resolve_matches();
         self.moves_left = self.moves_left.saturating_sub(1);
-        if had { self.score = self.score.saturating_add(10); }
+        if had {
+            self.score = self.score.saturating_add(10);
+        }
         true
     }
 
@@ -132,7 +149,9 @@ impl CrystalMatchGame {
             let mut x = 0;
             while x + 2 < self.size {
                 let c = self.grid[y][x];
-                if c != 0 && c == self.grid[y][x+1] && c == self.grid[y][x+2] { count += 3; }
+                if c != 0 && c == self.grid[y][x + 1] && c == self.grid[y][x + 2] {
+                    count += 3;
+                }
                 x += 1;
             }
             y += 1;
@@ -142,7 +161,9 @@ impl CrystalMatchGame {
             let mut y2 = 0;
             while y2 + 2 < self.size {
                 let c = self.grid[y2][x];
-                if c != 0 && c == self.grid[y2+1][x] && c == self.grid[y2+2][x] { count += 3; }
+                if c != 0 && c == self.grid[y2 + 1][x] && c == self.grid[y2 + 2][x] {
+                    count += 3;
+                }
                 y2 += 1;
             }
             x += 1;
@@ -160,8 +181,10 @@ impl CrystalMatchGame {
                 let mut x = 0;
                 while x + 2 < self.size {
                     let c = self.grid[y][x];
-                    if c != 0 && c == self.grid[y][x+1] && c == self.grid[y][x+2] {
-                        marked[y][x] = true; marked[y][x+1] = true; marked[y][x+2] = true;
+                    if c != 0 && c == self.grid[y][x + 1] && c == self.grid[y][x + 2] {
+                        marked[y][x] = true;
+                        marked[y][x + 1] = true;
+                        marked[y][x + 2] = true;
                         found = true;
                     }
                     x += 1;
@@ -173,15 +196,19 @@ impl CrystalMatchGame {
                 let mut y2 = 0;
                 while y2 + 2 < self.size {
                     let c = self.grid[y2][x];
-                    if c != 0 && c == self.grid[y2+1][x] && c == self.grid[y2+2][x] {
-                        marked[y2][x] = true; marked[y2+1][x] = true; marked[y2+2][x] = true;
+                    if c != 0 && c == self.grid[y2 + 1][x] && c == self.grid[y2 + 2][x] {
+                        marked[y2][x] = true;
+                        marked[y2 + 1][x] = true;
+                        marked[y2 + 2][x] = true;
                         found = true;
                     }
                     y2 += 1;
                 }
                 x += 1;
             }
-            if !found { break; }
+            if !found {
+                break;
+            }
             any = true;
             let mut yy = 0;
             while yy < self.size {
@@ -212,11 +239,16 @@ impl CrystalMatchGame {
                 if c != 0 {
                     write_y -= 1;
                     self.grid[write_y][x] = c;
-                    if write_y != y { self.grid[y][x] = 0; }
+                    if write_y != y {
+                        self.grid[y][x] = 0;
+                    }
                 }
             }
             let mut y2 = 0;
-            while y2 < write_y { self.grid[y2][x] = 0; y2 += 1; }
+            while y2 < write_y {
+                self.grid[y2][x] = 0;
+                y2 += 1;
+            }
             x += 1;
         }
     }
@@ -226,7 +258,9 @@ impl CrystalMatchGame {
         while y < self.size {
             let mut x = 0;
             while x < self.size {
-                if self.grid[y][x] == 0 { self.grid[y][x] = self.random_crystal(); }
+                if self.grid[y][x] == 0 {
+                    self.grid[y][x] = self.random_crystal();
+                }
                 x += 1;
             }
             y += 1;
@@ -235,11 +269,19 @@ impl CrystalMatchGame {
 
     unsafe fn read_xy() -> Option<(usize, usize)> {
         let a = read_key_blocking();
-        if a == b'q' { return None; }
-        if a == b'r' { return Some((9, 9)); }
-        if a < b'0' || a > b'9' { return Some((8, 8)); }
+        if a == b'q' {
+            return None;
+        }
+        if a == b'r' {
+            return Some((9, 9));
+        }
+        if a < b'0' || a > b'9' {
+            return Some((8, 8));
+        }
         let b = read_key_blocking();
-        if b < b'0' || b > b'9' { return Some((8, 8)); }
+        if b < b'0' || b > b'9' {
+            return Some((8, 8));
+        }
         Some(((a - b'0') as usize, (b - b'0') as usize))
     }
 
@@ -257,11 +299,13 @@ impl CrystalMatchGame {
                 Some((9, 9)) => self.return_crystal(),
                 Some((8, 8)) => {}
                 Some((x, y)) => {
-                    if self.has_held { let _ = self.swap_crystal(x, y); }
-                    else             { let _ = self.grab_crystal(x, y); }
+                    if self.has_held {
+                        let _ = self.swap_crystal(x, y);
+                    } else {
+                        let _ = self.grab_crystal(x, y);
+                    }
                 }
             }
         }
     }
 }
-

@@ -11,16 +11,16 @@
 #[repr(u8)]
 #[allow(non_camel_case_types)]
 pub enum GeneralCategory {
-    Cc = 0, // Control
-    Cf = 1, // Format
-    Co = 2, // Private Use
-    Cs = 3, // Surrogate
-    Ll = 4, // Lowercase Letter
-    Lm = 5, // Modifier Letter
-    Lo = 6, // Other Letter
-    Lt = 7, // Titlecase Letter
-    Lu = 8, // Uppercase Letter
-    Mc = 9, // Spacing Mark
+    Cc = 0,  // Control
+    Cf = 1,  // Format
+    Co = 2,  // Private Use
+    Cs = 3,  // Surrogate
+    Ll = 4,  // Lowercase Letter
+    Lm = 5,  // Modifier Letter
+    Lo = 6,  // Other Letter
+    Lt = 7,  // Titlecase Letter
+    Lu = 8,  // Uppercase Letter
+    Mc = 9,  // Spacing Mark
     Me = 10, // Enclosing Mark
     Mn = 11, // Nonspacing Mark
     Nd = 12, // Decimal Number
@@ -81,17 +81,36 @@ impl GeneralCategory {
 
     /// Это буква?
     pub fn is_letter(self) -> bool {
-        matches!(self, GeneralCategory::Lu | GeneralCategory::Ll | GeneralCategory::Lt | GeneralCategory::Lm | GeneralCategory::Lo)
+        matches!(
+            self,
+            GeneralCategory::Lu
+                | GeneralCategory::Ll
+                | GeneralCategory::Lt
+                | GeneralCategory::Lm
+                | GeneralCategory::Lo
+        )
     }
 
     /// Это цифра?
     pub fn is_number(self) -> bool {
-        matches!(self, GeneralCategory::Nd | GeneralCategory::Nl | GeneralCategory::No)
+        matches!(
+            self,
+            GeneralCategory::Nd | GeneralCategory::Nl | GeneralCategory::No
+        )
     }
 
     /// Это пунктуация?
     pub fn is_punctuation(self) -> bool {
-        matches!(self, GeneralCategory::Pc | GeneralCategory::Pd | GeneralCategory::Ps | GeneralCategory::Pe | GeneralCategory::Pi | GeneralCategory::Pf | GeneralCategory::Po)
+        matches!(
+            self,
+            GeneralCategory::Pc
+                | GeneralCategory::Pd
+                | GeneralCategory::Ps
+                | GeneralCategory::Pe
+                | GeneralCategory::Pi
+                | GeneralCategory::Pf
+                | GeneralCategory::Po
+        )
     }
 }
 
@@ -2661,10 +2680,10 @@ static CATEGORY_RANGES: [(u32, u32, GeneralCategory); 3409] = [
     (0xFFE4, 0xFFE4, GeneralCategory::So),
     (0xFFE5, 0xFFE6, GeneralCategory::Sc), // 2 chars
     (0xFFE8, 0xFFE8, GeneralCategory::So),
-    (0xFFE9, 0xFFEC, GeneralCategory::Sm), // 4 chars
-    (0xFFED, 0xFFEE, GeneralCategory::So), // 2 chars
-    (0xFFF9, 0xFFFB, GeneralCategory::Cf), // 3 chars
-    (0xFFFC, 0xFFFD, GeneralCategory::So), // 2 chars
+    (0xFFE9, 0xFFEC, GeneralCategory::Sm),   // 4 chars
+    (0xFFED, 0xFFEE, GeneralCategory::So),   // 2 chars
+    (0xFFF9, 0xFFFB, GeneralCategory::Cf),   // 3 chars
+    (0xFFFC, 0xFFFD, GeneralCategory::So),   // 2 chars
     (0x10000, 0x1000B, GeneralCategory::Lo), // 12 chars
     (0x1000D, 0x10026, GeneralCategory::Lo), // 26 chars
     (0x10028, 0x1003A, GeneralCategory::Lo), // 19 chars
@@ -3502,9 +3521,9 @@ static CATEGORY_RANGES: [(u32, u32, GeneralCategory); 3409] = [
     (0x30000, 0x3134A, GeneralCategory::Lo), // 4939 chars
     (0x31350, 0x33479, GeneralCategory::Lo), // 8490 chars
     (0xE0001, 0xE0001, GeneralCategory::Cf),
-    (0xE0020, 0xE007F, GeneralCategory::Cf), // 96 chars
-    (0xE0100, 0xE01EF, GeneralCategory::Mn), // 240 chars
-    (0xF0000, 0xFFFFD, GeneralCategory::Co), // 65534 chars
+    (0xE0020, 0xE007F, GeneralCategory::Cf),   // 96 chars
+    (0xE0100, 0xE01EF, GeneralCategory::Mn),   // 240 chars
+    (0xF0000, 0xFFFFD, GeneralCategory::Co),   // 65534 chars
     (0x100000, 0x10FFFD, GeneralCategory::Co), // 65534 chars
 ];
 
@@ -3527,7 +3546,9 @@ pub fn find_category(cp: u32) -> GeneralCategory {
 }
 
 /// Общее количество определённых символов
-pub fn total_defined_chars() -> usize { 299382 }
+pub fn total_defined_chars() -> usize {
+    299382
+}
 
 /// Количество сжатых диапазонов
 pub fn category_range_count() -> usize {

@@ -1,78 +1,143 @@
+use crate::apps::activity::ActivityIntent;
+use crate::kernel_messages::Locale;
 /// Locale Switcher — APPS activity.
 ///
 /// Показывает меню выбора языка (RU / EN / AR).
 /// После выбора: устанавливает локаль, обновляет badge, Pop.
-
 use x86_64::instructions::hlt;
-use crate::apps::activity::ActivityIntent;
-use crate::kernel_messages::Locale;
 
 // ── Direct VGA (same helpers as launcher) ─────────────────────────────────────
 const VGA: *mut u8 = 0xb8000 as *mut u8;
 
 unsafe fn put(row: usize, col: usize, ch: u8, color: u8) {
-    if row >= 25 || col >= 80 { return; }
+    if row >= 25 || col >= 80 {
+        return;
+    }
     let off = (row * 80 + col) * 2;
     core::ptr::write_volatile(VGA.add(off), ch);
     core::ptr::write_volatile(VGA.add(off + 1), color);
 }
 
 unsafe fn fill_seg(row: usize, col: usize, len: usize, color: u8) {
-    for c in 0..len { put(row, col + c, b' ', color); }
+    for c in 0..len {
+        put(row, col + c, b' ', color);
+    }
 }
 
 unsafe fn puts(row: usize, col: usize, s: &[u8], color: u8) {
-    for (i, &b) in s.iter().enumerate() { put(row, col + i, b, color); }
+    for (i, &b) in s.iter().enumerate() {
+        put(row, col + i, b, color);
+    }
+}
+
+unsafe fn puts_utf8(row: usize, col: usize, s: &str, color: u8) -> usize {
+    let mut x = col;
+    for ch in s.chars() {
+        if row >= 25 || x >= 80 {
+            break;
+        }
+        x += crate::vga_unicode::print_char(ch as u32, x, row, color).max(1);
+    }
+    x.saturating_sub(col)
 }
 
 unsafe fn fill_screen(color: u8) {
-    for r in 0..25usize { fill_seg(r, 0, 80, color); }
+    for r in 0..25usize {
+        fill_seg(r, 0, 80, color);
+    }
 }
 
 // ── Colors ─────────────────────────────────────────────────────────────────────
-const BG:     u8 = 0x10;
+const BG: u8 = 0x10;
 const BORDER: u8 = 0x1B;
-const TITLE:  u8 = 0x1E;
+const TITLE: u8 = 0x1E;
 const NORMAL: u8 = 0x17;
-const HILIT:  u8 = 0x70;
-const HINT:   u8 = 0x18;
-const TAG:    u8 = 0x1A;
-const ARW:    u8 = 0x10; // ►
-const HZ:     u8 = 0xCD;
-const VT:     u8 = 0xBA;
-const TL:     u8 = 0xC9;
-const TR:     u8 = 0xBB;
-const BL:     u8 = 0xC8;
-const BR:     u8 = 0xBC;
-const ML:     u8 = 0xCC;
-const MR:     u8 = 0xB9;
+const HILIT: u8 = 0x70;
+const HINT: u8 = 0x18;
+const TAG: u8 = 0x1A;
+const ARW: u8 = 0x10; // ►
+const HZ: u8 = 0xCD;
+const VT: u8 = 0xBA;
+const TL: u8 = 0xC9;
+const TR: u8 = 0xBB;
+const BL: u8 = 0xC8;
+const BR: u8 = 0xBC;
+const ML: u8 = 0xCC;
+const MR: u8 = 0xB9;
 
 // ── Menu items ────────────────────────────────────────────────────────────────
 struct LocaleEntry {
     locale: Locale,
-    name:   &'static [u8],
-    desc:   &'static [u8],
-    tag:    &'static [u8],
+    name: &'static [u8],
+    desc: &'static [u8],
+    tag: &'static [u8],
 }
 
 const ITEMS: &[LocaleEntry] = &[
-    LocaleEntry { locale: Locale::RuRu, name: b"RU", desc: b"Russian  \xB7  Cyrillic, LTR",  tag: b"[RU]" },
-    LocaleEntry { locale: Locale::EnUs, name: b"EN", desc: b"English  \xB7  ASCII, LTR",      tag: b"[EN]" },
-    LocaleEntry { locale: Locale::ArEg, name: b"AR", desc: b"Arabic   \xB7  RTL",             tag: b"[AR]" },
+    LocaleEntry {
+        locale: Locale::RuRu,
+        name: b"RU",
+        desc: b"Russian  \xB7  Cyrillic, LTR",
+        tag: b"[RU]",
+    },
+    LocaleEntry {
+        locale: Locale::EnUs,
+        name: b"EN",
+        desc: b"English  \xB7  ASCII, LTR",
+        tag: b"[EN]",
+    },
+    LocaleEntry {
+        locale: Locale::ArEg,
+        name: b"AR",
+        desc: b"Arabic   \xB7  RTL",
+        tag: b"[AR]",
+    },
 ];
 
 const BOX_COL: usize = 22;
-const BOX_W:   usize = 34;
+const BOX_W: usize = 34;
 const BOX_ROW: usize = 7;
+
+fn current_locale() -> Locale {
+    crate::locale::get_locale()
+}
+
+fn breadcrumb_text() -> &'static str {
+    match current_locale() {
+        Locale::RuRu => " · ПРИЛОЖЕНИЯ · Язык",
+        Locale::EnUs => " · APPS · Language",
+        Locale::ArEg => " · التطبيقات · اللغة",
+    }
+}
+
+fn title_text() -> &'static str {
+    match current_locale() {
+        Locale::RuRu => "ЯЗЫК / LANGUAGE / LUGHA",
+        Locale::EnUs => "LANGUAGE / YAZYK / LUGHA",
+        Locale::ArEg => "اللغة / LANGUAGE / YAZYK",
+    }
+}
+
+fn hint_text() -> &'static str {
+    match current_locale() {
+        Locale::RuRu => "↑↓ выбор    Enter применить    Esc отмена",
+        Locale::EnUs => "↑↓ select    Enter apply    Esc cancel",
+        Locale::ArEg => "↑↓ اختيار    Enter تطبيق    Esc إلغاء",
+    }
+}
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 pub fn on_start() {
-    unsafe { render(0); }
+    unsafe {
+        render(0);
+    }
 }
 
 pub fn on_resume() {
-    unsafe { render(0); }
+    unsafe {
+        render(0);
+    }
 }
 
 pub fn on_pause() {}
@@ -84,35 +149,45 @@ pub fn update(_depth: usize) -> ActivityIntent {
     // Highlight current locale
     let cur = crate::locale::get_locale();
     for (i, e) in ITEMS.iter().enumerate() {
-        if e.locale == cur { sel = i; break; }
+        if e.locale == cur {
+            sel = i;
+            break;
+        }
     }
 
-    unsafe { render(sel); }
+    unsafe {
+        render(sel);
+    }
 
     loop {
         unsafe {
-        if crate::ps2::has_scancode() {
-            let sc = crate::ps2::read_scancode();
-            if sc & 0x80 != 0 { continue; } // key-up
+            if crate::ps2::has_scancode() {
+                let sc = crate::ps2::read_scancode();
+                if sc & 0x80 != 0 {
+                    continue;
+                } // key-up
 
-            match sc {
-                0x48 => { // ↑
-                    sel = if sel == 0 { ITEMS.len() - 1 } else { sel - 1 };
-                    render(sel);
+                match sc {
+                    0x48 => {
+                        // ↑
+                        sel = if sel == 0 { ITEMS.len() - 1 } else { sel - 1 };
+                        render(sel);
+                    }
+                    0x50 => {
+                        // ↓
+                        sel = (sel + 1) % ITEMS.len();
+                        render(sel);
+                    }
+                    0x1C => {
+                        // Enter — apply & back
+                        crate::locale::set_locale(ITEMS[sel].locale);
+                        crate::locale::draw_locale_badge();
+                        return ActivityIntent::Pop;
+                    }
+                    0x01 => return ActivityIntent::Pop, // Esc
+                    _ => {}
                 }
-                0x50 => { // ↓
-                    sel = (sel + 1) % ITEMS.len();
-                    render(sel);
-                }
-                0x1C => { // Enter — apply & back
-                    crate::locale::set_locale(ITEMS[sel].locale);
-                    crate::locale::draw_locale_badge();
-                    return ActivityIntent::Pop;
-                }
-                0x01 => return ActivityIntent::Pop, // Esc
-                _ => {}
             }
-        }
         } // unsafe
         hlt();
     }
@@ -125,32 +200,36 @@ unsafe fn render(sel: usize) {
 
     // Breadcrumb
     puts(0, 2, b"[ NeroShizaDev-OS ]", TITLE);
-    puts(0, 21, b" \xB7 APPS \xB7 Language", BORDER);
+    puts_utf8(0, 21, breadcrumb_text(), BORDER);
 
     // Top border
     put(BOX_ROW, BOX_COL, TL, BORDER);
-    for c in 1..=BOX_W { put(BOX_ROW, BOX_COL + c, HZ, BORDER); }
+    for c in 1..=BOX_W {
+        put(BOX_ROW, BOX_COL + c, HZ, BORDER);
+    }
     put(BOX_ROW, BOX_COL + BOX_W + 1, TR, BORDER);
 
     // Title bar
     let h = BOX_ROW + 1;
     put(h, BOX_COL, VT, BORDER);
     fill_seg(h, BOX_COL + 1, BOX_W, TITLE);
-    puts(h, BOX_COL + 7, b"LANGUAGE / YAZYK / LUGHA", TITLE);
+    puts_utf8(h, BOX_COL + 3, title_text(), TITLE);
     put(h, BOX_COL + BOX_W + 1, VT, BORDER);
 
     // Divider
     let div = BOX_ROW + 2;
     put(div, BOX_COL, ML, BORDER);
-    for c in 1..=BOX_W { put(div, BOX_COL + c, HZ, BORDER); }
+    for c in 1..=BOX_W {
+        put(div, BOX_COL + c, HZ, BORDER);
+    }
     put(div, BOX_COL + BOX_W + 1, MR, BORDER);
 
     // Items
     for (i, e) in ITEMS.iter().enumerate() {
-        let row    = BOX_ROW + 3 + i;
+        let row = BOX_ROW + 3 + i;
         let is_sel = i == sel;
-        let fg     = if is_sel { HILIT } else { NORMAL };
-        let rb     = if is_sel { HILIT } else { BG };
+        let fg = if is_sel { HILIT } else { NORMAL };
+        let rb = if is_sel { HILIT } else { BG };
 
         put(row, BOX_COL, VT, BORDER);
         fill_seg(row, BOX_COL + 1, BOX_W, rb);
@@ -161,7 +240,12 @@ unsafe fn render(sel: usize) {
         // Name (2 chars)
         puts(row, BOX_COL + 4, e.name, fg);
         put(row, BOX_COL + 6, b' ', fg);
-        put(row, BOX_COL + 7, b'\xB3', if is_sel { HILIT } else { BORDER }); // │
+        put(
+            row,
+            BOX_COL + 7,
+            b'\xB3',
+            if is_sel { HILIT } else { BORDER },
+        ); // │
 
         // Desc
         puts(row, BOX_COL + 9, e.desc, fg);
@@ -181,9 +265,11 @@ unsafe fn render(sel: usize) {
 
     let bot2 = bot + 1;
     put(bot2, BOX_COL, BL, BORDER);
-    for c in 1..=BOX_W { put(bot2, BOX_COL + c, HZ, BORDER); }
+    for c in 1..=BOX_W {
+        put(bot2, BOX_COL + c, HZ, BORDER);
+    }
     put(bot2, BOX_COL + BOX_W + 1, BR, BORDER);
 
     // Hint
-    puts(bot2 + 2, 15, b"\x18\x19 select    Enter apply    Esc cancel", HINT);
+    puts_utf8(bot2 + 2, 12, hint_text(), HINT);
 }

@@ -6,7 +6,6 @@ use spin;
 use x86_64::instructions::port::Port;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
-
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 
@@ -18,8 +17,12 @@ pub enum InterruptIndex {
 }
 
 impl InterruptIndex {
-    fn as_u8(self) -> u8 { self as u8 }
-    fn as_usize(self) -> usize { usize::from(self.as_u8()) }
+    fn as_u8(self) -> u8 {
+        self as u8
+    }
+    fn as_usize(self) -> usize {
+        usize::from(self.as_u8())
+    }
 }
 
 pub static PICS: spin::Mutex<ChainedPics> =
@@ -55,7 +58,9 @@ pub fn init_idt() {
 #[inline(always)]
 fn halt_forever() -> ! {
     x86_64::instructions::interrupts::disable();
-    loop { x86_64::instructions::hlt(); }
+    loop {
+        x86_64::instructions::hlt();
+    }
 }
 
 unsafe fn notify_end_of_interrupt_raw(interrupt: InterruptIndex) {
@@ -68,8 +73,14 @@ unsafe fn notify_end_of_interrupt_raw(interrupt: InterruptIndex) {
 
 extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) {
     crate::serial_println!("========== ТОЧКА ОСТАНОВА ==========");
-    crate::serial_println!("Указатель инструкции: {:#x}", _stack_frame.instruction_pointer.as_u64());
-    crate::serial_println!("Указатель стека:      {:#x}", _stack_frame.stack_pointer.as_u64());
+    crate::serial_println!(
+        "Указатель инструкции: {:#x}",
+        _stack_frame.instruction_pointer.as_u64()
+    );
+    crate::serial_println!(
+        "Указатель стека:      {:#x}",
+        _stack_frame.stack_pointer.as_u64()
+    );
     crate::serial_println!("=====================================");
     // Breakpoint (INT3) — recoverable исключение. Логируем и возвращаемся.
     // НЕ halt_forever() — иначе система зависает на первом int3 при отладке.
@@ -80,18 +91,27 @@ extern "x86-interrupt" fn page_fault_handler(
     _stack_frame: InterruptStackFrame,
     err: PageFaultErrorCode,
 ) {
-    use x86_64::registers::control::Cr2;
     use crate::kernel_messages::KernelEvent;
+    use x86_64::registers::control::Cr2;
     crate::trace::record_fatal("page fault handler entered");
     let cr2 = Cr2::read_raw();
     // Serial: полный дамп для диагностики
     crate::serial_println!("========== ОШИБКА СТРАНИЦЫ ==========");
     crate::serial_println!("Адрес обращения (CR2): {:#x}", cr2);
     crate::serial_println!("Код ошибки:            {:#x}", err.bits());
-    crate::serial_println!("Указатель инструкции:  {:#x}", _stack_frame.instruction_pointer.as_u64());
-    crate::serial_println!("Указатель стека:       {:#x}", _stack_frame.stack_pointer.as_u64());
+    crate::serial_println!(
+        "Указатель инструкции:  {:#x}",
+        _stack_frame.instruction_pointer.as_u64()
+    );
+    crate::serial_println!(
+        "Указатель стека:       {:#x}",
+        _stack_frame.stack_pointer.as_u64()
+    );
     crate::serial_println!("Сегмент кода:          {:#x}", _stack_frame.code_segment.0);
-    crate::serial_println!("Флаги CPU:             {:#x}", _stack_frame.cpu_flags.bits());
+    crate::serial_println!(
+        "Флаги CPU:             {:#x}",
+        _stack_frame.cpu_flags.bits()
+    );
     crate::serial_println!("=====================================");
     // SAFETY: page fault handler — прерывания отключены, мьютексы нельзя использовать.
     // render_panic_screen и write_*_at_vga обращаются к VGA напрямую без блокировок.
@@ -120,8 +140,14 @@ extern "x86-interrupt" fn general_protection_fault_handler(
     // Serial: полный дамп для диагностики
     crate::serial_println!("========== НАРУШЕНИЕ ЗАЩИТЫ ==========");
     crate::serial_println!("Код ошибки:           {:#x}", error_code);
-    crate::serial_println!("Указатель инструкции: {:#x}", _stack_frame.instruction_pointer.as_u64());
-    crate::serial_println!("Указатель стека:      {:#x}", _stack_frame.stack_pointer.as_u64());
+    crate::serial_println!(
+        "Указатель инструкции: {:#x}",
+        _stack_frame.instruction_pointer.as_u64()
+    );
+    crate::serial_println!(
+        "Указатель стека:      {:#x}",
+        _stack_frame.stack_pointer.as_u64()
+    );
     crate::serial_println!("Сегмент кода:         {:#x}", _stack_frame.code_segment.0);
     crate::serial_println!("Флаги CPU:            {:#x}", _stack_frame.cpu_flags.bits());
     crate::serial_println!("=======================================");
@@ -154,7 +180,9 @@ extern "x86-interrupt" fn double_fault_handler(
         }
     }
     fn serial_str(s: &str) {
-        for &b in s.as_bytes() { serial_byte(b); }
+        for &b in s.as_bytes() {
+            serial_byte(b);
+        }
     }
     fn serial_hex(mut v: u64) {
         let mut buf = [0u8; 16];
@@ -164,14 +192,24 @@ extern "x86-interrupt" fn double_fault_handler(
             v >>= 4;
         }
         serial_str("0x");
-        for &b in &buf { serial_byte(b); }
+        for &b in &buf {
+            serial_byte(b);
+        }
     }
 
     serial_str("========== ДВОЙНОЙ СБОЙ ==========\r\n");
-    serial_str("Инструкция: "); serial_hex(_stack_frame.instruction_pointer.as_u64()); serial_str("\r\n");
-    serial_str("Стек:       "); serial_hex(_stack_frame.stack_pointer.as_u64()); serial_str("\r\n");
-    serial_str("Сегмент:    "); serial_hex(_stack_frame.code_segment.0 as u64); serial_str("\r\n");
-    serial_str("Флаги:      "); serial_hex(_stack_frame.cpu_flags.bits()); serial_str("\r\n");
+    serial_str("Инструкция: ");
+    serial_hex(_stack_frame.instruction_pointer.as_u64());
+    serial_str("\r\n");
+    serial_str("Стек:       ");
+    serial_hex(_stack_frame.stack_pointer.as_u64());
+    serial_str("\r\n");
+    serial_str("Сегмент:    ");
+    serial_hex(_stack_frame.code_segment.0 as u64);
+    serial_str("\r\n");
+    serial_str("Флаги:      ");
+    serial_hex(_stack_frame.cpu_flags.bits());
+    serial_str("\r\n");
     serial_str("==================================\r\n");
 
     // Дамп последних trace-записей — показывает, какой модуль вызвал сбой
@@ -207,74 +245,80 @@ extern "x86-interrupt" fn double_fault_handler(
             core::ptr::write_volatile(vga.add(row * 80 + col), ((attr as u16) << 8) | ch as u16);
         }
     }
-        #[inline(always)]
-        fn vga_write(row: usize, col: usize, s: &str, attr: u8) {
-            let mut c = col;
-            for &b in s.as_bytes() {
-                if c >= 80 { break; }
-                vga_put(row, c, b, attr);
-                c += 1;
+    #[inline(always)]
+    fn vga_write(row: usize, col: usize, s: &str, attr: u8) {
+        let mut c = col;
+        for &b in s.as_bytes() {
+            if c >= 80 {
+                break;
             }
+            vga_put(row, c, b, attr);
+            c += 1;
         }
-        fn vga_hex64(row: usize, col: usize, mut v: u64, attr: u8) {
-            let mut buf = [0u8; 16];
-            for i in (0..16).rev() {
-                let d = (v & 0xF) as u8;
-                buf[i] = if d < 10 { b'0' + d } else { b'a' + d - 10 };
-                v >>= 4;
-            }
-            for (i, &b) in buf.iter().enumerate() {
-                if col + i >= 80 { break; }
-                vga_put(row, col + i, b, attr);
-            }
+    }
+    fn vga_hex64(row: usize, col: usize, mut v: u64, attr: u8) {
+        let mut buf = [0u8; 16];
+        for i in (0..16).rev() {
+            let d = (v & 0xF) as u8;
+            buf[i] = if d < 10 { b'0' + d } else { b'a' + d - 10 };
+            v >>= 4;
         }
+        for (i, &b) in buf.iter().enumerate() {
+            if col + i >= 80 {
+                break;
+            }
+            vga_put(row, col + i, b, attr);
+        }
+    }
 
-        const ATTR_BG: u8 = 0x0F; // white on black
-        const ATTR_FRAME: u8 = 0xDF; // white on magenta
-        const ATTR_HI: u8 = 0x0D; // bright magenta on black
+    const ATTR_BG: u8 = 0x0F; // white on black
+    const ATTR_FRAME: u8 = 0xDF; // white on magenta
+    const ATTR_HI: u8 = 0x0D; // bright magenta on black
 
-        // Clear screen
-        for row in 0..25 {
-            for col in 0..80 {
-                vga_put(row, col, b' ', ATTR_BG);
-            }
-        }
-        // Frame
+    // Clear screen
+    for row in 0..25 {
         for col in 0..80 {
-            vga_put(0, col, b'=', ATTR_FRAME);
-            vga_put(24, col, b'=', ATTR_FRAME);
+            vga_put(row, col, b' ', ATTR_BG);
         }
-        for row in 1..24 {
-            vga_put(row, 0, b'|', ATTR_FRAME);
-            vga_put(row, 79, b'|', ATTR_FRAME);
-        }
+    }
+    // Frame
+    for col in 0..80 {
+        vga_put(0, col, b'=', ATTR_FRAME);
+        vga_put(24, col, b'=', ATTR_FRAME);
+    }
+    for row in 1..24 {
+        vga_put(row, 0, b'|', ATTR_FRAME);
+        vga_put(row, 79, b'|', ATTR_FRAME);
+    }
 
-        vga_write(0, 22, "NeroShizaOS KERNEL EVENT", ATTR_FRAME);
-        vga_write(2, 3, "DF   [SAFE DOUBLE FAULT SCREEN]", ATTR_BG);
-        vga_write(4, 3, "DOUBLE FAULT. System halted.", ATTR_HI);
+    vga_write(0, 22, "NeroShizaOS KERNEL EVENT", ATTR_FRAME);
+    vga_write(2, 3, "DF   [SAFE DOUBLE FAULT SCREEN]", ATTR_BG);
+    vga_write(4, 3, "DOUBLE FAULT. System halted.", ATTR_HI);
 
-        vga_write(7, 3, "RIP: 0x", ATTR_BG);
-        vga_hex64(7, 10, _stack_frame.instruction_pointer.as_u64(), ATTR_HI);
-        vga_write(8, 3, "RSP: 0x", ATTR_BG);
-        vga_hex64(8, 10, _stack_frame.stack_pointer.as_u64(), ATTR_HI);
-        vga_write(9, 3, "FLG: 0x", ATTR_BG);
-        vga_hex64(9, 10, _stack_frame.cpu_flags.bits(), ATTR_HI);
+    vga_write(7, 3, "RIP: 0x", ATTR_BG);
+    vga_hex64(7, 10, _stack_frame.instruction_pointer.as_u64(), ATTR_HI);
+    vga_write(8, 3, "RSP: 0x", ATTR_BG);
+    vga_hex64(8, 10, _stack_frame.stack_pointer.as_u64(), ATTR_HI);
+    vga_write(9, 3, "FLG: 0x", ATTR_BG);
+    vga_hex64(9, 10, _stack_frame.cpu_flags.bits(), ATTR_HI);
 
-        vga_write(11, 3, "Last actions:", ATTR_BG);
-        let mut row = 12usize;
-        if trace_len == 0 {
-            vga_write(row, 5, "- (none)", ATTR_HI);
-        } else {
-            let first = trace_len.saturating_sub(6);
-            for i in first..trace_len {
-                if row >= 23 { break; }
-                if let Some(entry) = crate::trace::get_recent(i) {
-                    vga_write(row, 5, "- ", ATTR_BG);
-                    vga_write(row, 7, entry, ATTR_BG);
-                    row += 1;
-                }
+    vga_write(11, 3, "Last actions:", ATTR_BG);
+    let mut row = 12usize;
+    if trace_len == 0 {
+        vga_write(row, 5, "- (none)", ATTR_HI);
+    } else {
+        let first = trace_len.saturating_sub(6);
+        for i in first..trace_len {
+            if row >= 23 {
+                break;
+            }
+            if let Some(entry) = crate::trace::get_recent(i) {
+                vga_write(row, 5, "- ", ATTR_BG);
+                vga_write(row, 7, entry, ATTR_BG);
+                row += 1;
             }
         }
+    }
 
     vga_write(23, 20, "System halted. Check serial.log", ATTR_BG);
 
@@ -310,25 +354,29 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     // PIC ожидает чтения до отправки следующего прерывания.
     // ISR-контекст: нет конкурентного доступа к порту.
     let scancode: u8 = unsafe { port.read() };
+    let owner = crate::ps2::input_owner();
+    crate::ps2::trace_irq_scancode(scancode, owner);
 
     // --- Обновление модификаторов ВСЕГДА, независимо от input_owner ---
     // BUG FIX: раньше модификаторы не обновлялись в режиме Apps → глюки хоткеев.
     // Используем AtomicBool (Ordering::Relaxed: ISR — единственный writer, CPU не кеширует).
     match scancode {
-        0x38 => crate::shell::ALT_HELD.store(true,   Ordering::Relaxed),
-        0xB8 => crate::shell::ALT_HELD.store(false,  Ordering::Relaxed),
-        0x1D => crate::shell::CTRL_HELD.store(true,  Ordering::Relaxed),
+        0x38 => crate::shell::ALT_HELD.store(true, Ordering::Relaxed),
+        0xB8 => crate::shell::ALT_HELD.store(false, Ordering::Relaxed),
+        0x1D => crate::shell::CTRL_HELD.store(true, Ordering::Relaxed),
         0x9D => crate::shell::CTRL_HELD.store(false, Ordering::Relaxed),
-        0x2A | 0x36 => crate::shell::SHIFT_HELD.store(true,  Ordering::Relaxed),
+        0x2A | 0x36 => crate::shell::SHIFT_HELD.store(true, Ordering::Relaxed),
         0xAA | 0xB6 => crate::shell::SHIFT_HELD.store(false, Ordering::Relaxed),
         _ => {}
     }
 
     // --- Если ввод принадлежит приложениям — пушим в очередь и выходим ---
-    if crate::ps2::input_owner() == crate::ps2::InputOwner::Apps {
+    if owner == crate::ps2::InputOwner::Apps {
         // CapsLock в режиме Apps: не шлём в shell, пушим как обычный scancode
         crate::ps2::push_scancode_from_irq(scancode);
-        unsafe { notify_end_of_interrupt_raw(InterruptIndex::Keyboard); }
+        unsafe {
+            notify_end_of_interrupt_raw(InterruptIndex::Keyboard);
+        }
         return;
     }
 
@@ -337,11 +385,16 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     // CapsLock (0x3A) — перехватываем ДО pc-keyboard, чтобы не менял регистр
     if scancode == 0x3A {
         crate::shell::handle_raw_key(pc_keyboard::KeyCode::CapsLock);
-        unsafe { notify_end_of_interrupt_raw(InterruptIndex::Keyboard); }
+        unsafe {
+            notify_end_of_interrupt_raw(InterruptIndex::Keyboard);
+        }
         return;
     }
-    if scancode == 0xBA { // 0x3A | 0x80 = отпускание CapsLock
-        unsafe { notify_end_of_interrupt_raw(InterruptIndex::Keyboard); }
+    if scancode == 0xBA {
+        // 0x3A | 0x80 = отпускание CapsLock
+        unsafe {
+            notify_end_of_interrupt_raw(InterruptIndex::Keyboard);
+        }
         return;
     }
 
@@ -357,5 +410,7 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     drop(keyboard); // явный drop до EOI
 
     // SAFETY: EOI для IRQ1; без этого PIC не отправит следующее прерывание клавиатуры.
-    unsafe { notify_end_of_interrupt_raw(InterruptIndex::Keyboard); }
+    unsafe {
+        notify_end_of_interrupt_raw(InterruptIndex::Keyboard);
+    }
 }

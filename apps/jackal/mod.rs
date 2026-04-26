@@ -12,11 +12,11 @@
 // ============================================================
 
 pub mod analyzer;
-pub mod shell;
 pub mod encoder;
+pub mod shell;
 pub mod tools;
 
 // Реэкспорт для удобства использования из lib.rs:
-pub use analyzer::{analyze, FileKind, Report, MagicHit};
-pub use shell::run_on_slice;
+pub use analyzer::{FileKind, MagicHit, Report, analyze};
 pub use encoder::encode;
+pub use shell::run_on_slice;

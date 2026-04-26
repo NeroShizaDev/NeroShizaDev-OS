@@ -19,18 +19,18 @@ pub enum Format {
     Auto,
     Json,
     Html,
-    Xml,   // включает FB2
+    Xml, // включает FB2
     Raw,
 }
 
 /// Опции очистки (аналог DEFAULT_OPTS)
 pub struct ExtractOpts {
-    pub remove_urls:       bool,
-    pub remove_html_tags:  bool,
-    pub remove_markdown:   bool,
-    pub remove_json_meta:  bool,
-    pub remove_brackets:   bool,
-    pub collapse_spaces:   bool,
+    pub remove_urls: bool,
+    pub remove_html_tags: bool,
+    pub remove_markdown: bool,
+    pub remove_json_meta: bool,
+    pub remove_brackets: bool,
+    pub collapse_spaces: bool,
     pub preserve_newlines: bool,
 }
 
@@ -38,12 +38,12 @@ impl ExtractOpts {
     /// Настройки по умолчанию (совпадают с Python DEFAULT_OPTS)
     pub const fn default() -> Self {
         Self {
-            remove_urls:       true,
-            remove_html_tags:  true,
-            remove_markdown:   true,
-            remove_json_meta:  true,
-            remove_brackets:   false,
-            collapse_spaces:   true,
+            remove_urls: true,
+            remove_html_tags: true,
+            remove_markdown: true,
+            remove_json_meta: true,
+            remove_brackets: false,
+            collapse_spaces: true,
             preserve_newlines: true,
         }
     }
@@ -80,21 +80,20 @@ pub fn detect_format(data: &[u8]) -> Format {
 /// Возвращает количество записанных байт.
 ///
 /// Алгоритм: сначала format-specific разбор, затем general cleaner.
-pub fn extract<'a>(
-    src: &[u8],
-    dst: &'a mut [u8],
-    mode: Format,
-    opts: &ExtractOpts,
-) -> usize {
-    let fmt = if mode == Format::Auto { detect_format(src) } else { mode };
+pub fn extract<'a>(src: &[u8], dst: &'a mut [u8], mode: Format, opts: &ExtractOpts) -> usize {
+    let fmt = if mode == Format::Auto {
+        detect_format(src)
+    } else {
+        mode
+    };
 
     // Промежуточный буфер для format-specific прохода
     let mut stage: [u8; 8192] = [0u8; 8192];
     let stage_len = match fmt {
         Format::Json => strip_json_keys(src, &mut stage, opts),
         Format::Html => strip_html_tags(src, &mut stage),
-        Format::Xml  => strip_xml_tags(src, &mut stage),
-        _            => {
+        Format::Xml => strip_xml_tags(src, &mut stage),
+        _ => {
             let n = src.len().min(stage.len());
             stage[..n].copy_from_slice(&src[..n]);
             n
@@ -114,9 +113,19 @@ pub fn extract<'a>(
 fn strip_json_keys(src: &[u8], dst: &mut [u8], opts: &ExtractOpts) -> usize {
     // Ключи которые считаем мусором (аналог Python meta_keys)
     const META_KEYS: &[&[u8]] = &[
-        b"role", b"model", b"id", b"object", b"created", b"index",
-        b"finish_reason", b"logprobs", b"type", b"usage",
-        b"prompt_tokens", b"completion_tokens", b"total_tokens",
+        b"role",
+        b"model",
+        b"id",
+        b"object",
+        b"created",
+        b"index",
+        b"finish_reason",
+        b"logprobs",
+        b"type",
+        b"usage",
+        b"prompt_tokens",
+        b"completion_tokens",
+        b"total_tokens",
     ];
 
     let mut dst_pos = 0usize;
@@ -141,9 +150,13 @@ fn strip_json_keys(src: &[u8], dst: &mut [u8], opts: &ExtractOpts) -> usize {
             } else {
                 // Это значение — копируем
                 for &b in s {
-                    if dst_pos >= dst.len() { break; }
+                    if dst_pos >= dst.len() {
+                        break;
+                    }
                     // Экранирование: \n → реальный перенос
-                    if b == b'\\' { continue; }
+                    if b == b'\\' {
+                        continue;
+                    }
                     dst[dst_pos] = b;
                     dst_pos += 1;
                 }
@@ -164,8 +177,13 @@ fn strip_json_keys(src: &[u8], dst: &mut [u8], opts: &ExtractOpts) -> usize {
 fn read_json_string(src: &[u8], start: usize) -> (&[u8], usize) {
     let mut i = start;
     while i < src.len() {
-        if src[i] == b'\\' { i += 2; continue; }
-        if src[i] == b'"' { return (&src[start..i], i + 1); }
+        if src[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if src[i] == b'"' {
+            return (&src[start..i], i + 1);
+        }
         i += 1;
     }
     (&src[start..i], i)
@@ -173,7 +191,8 @@ fn read_json_string(src: &[u8], start: usize) -> (&[u8], usize) {
 
 fn skip_whitespace(src: &[u8], start: usize) -> usize {
     let mut i = start;
-    while i < src.len() && (src[i] == b' ' || src[i] == b'\t' || src[i] == b'\n' || src[i] == b'\r') {
+    while i < src.len() && (src[i] == b' ' || src[i] == b'\t' || src[i] == b'\n' || src[i] == b'\r')
+    {
         i += 1;
     }
     i
@@ -182,7 +201,9 @@ fn skip_whitespace(src: &[u8], start: usize) -> usize {
 /// Пропускает одно JSON-значение (строку, число, null, bool, объект, массив).
 fn skip_json_value(src: &[u8], start: usize) -> usize {
     let i = skip_whitespace(src, start);
-    if i >= src.len() { return i; }
+    if i >= src.len() {
+        return i;
+    }
     match src[i] {
         b'"' => {
             let (_, end) = read_json_string(src, i + 1);
@@ -194,9 +215,11 @@ fn skip_json_value(src: &[u8], start: usize) -> usize {
             let mut depth = 1usize;
             let mut j = i + 1;
             while j < src.len() && depth > 0 {
-                if src[j] == src[i] { depth += 1; }
-                else if src[j] == close { depth -= 1; }
-                else if src[j] == b'"' {
+                if src[j] == src[i] {
+                    depth += 1;
+                } else if src[j] == close {
+                    depth -= 1;
+                } else if src[j] == b'"' {
                     let (_, end) = read_json_string(src, j + 1);
                     j = end;
                     continue;
@@ -205,14 +228,28 @@ fn skip_json_value(src: &[u8], start: usize) -> usize {
             }
             // Пропускаем запятую если есть
             let j = skip_whitespace(src, j);
-            if j < src.len() && src[j] == b',' { j + 1 } else { j }
+            if j < src.len() && src[j] == b',' {
+                j + 1
+            } else {
+                j
+            }
         }
         _ => {
             // Число / null / true / false — до запятой или пробела
             let mut j = i;
-            while j < src.len() && src[j] != b',' && src[j] != b'}' && src[j] != b']'
-                  && src[j] != b'\n' { j += 1; }
-            if j < src.len() && src[j] == b',' { j + 1 } else { j }
+            while j < src.len()
+                && src[j] != b','
+                && src[j] != b'}'
+                && src[j] != b']'
+                && src[j] != b'\n'
+            {
+                j += 1;
+            }
+            if j < src.len() && src[j] == b',' {
+                j + 1
+            } else {
+                j
+            }
         }
     }
 }
@@ -230,7 +267,7 @@ fn strip_html_tags(src: &[u8], dst: &mut [u8]) -> usize {
     while i < src.len() && dst_pos < dst.len() {
         if in_script {
             // Пропускаем до </script>
-            if i + 8 < src.len() && &src[i..i+9] == b"</script>" {
+            if i + 8 < src.len() && &src[i..i + 9] == b"</script>" {
                 in_script = false;
                 i += 9;
             } else {
@@ -243,7 +280,7 @@ fn strip_html_tags(src: &[u8], dst: &mut [u8]) -> usize {
             in_tag = true;
             // Проверяем <script
             if i + 6 < src.len() {
-                let tag = &src[i..i+7];
+                let tag = &src[i..i + 7];
                 if tag == b"<script" || tag == b"<SCRIPT" {
                     in_script = true;
                 }
@@ -266,9 +303,10 @@ fn strip_html_tags(src: &[u8], dst: &mut [u8]) -> usize {
 }
 
 fn is_block_tag(src: &[u8], pos: usize) -> bool {
-    const BLOCK: &[&[u8]] = &[b"<p", b"<div", b"<h1", b"<h2", b"<h3",
-                               b"<h4", b"<h5", b"<h6", b"<li", b"<tr",
-                               b"<br", b"<P", b"<DIV", b"<BR"];
+    const BLOCK: &[&[u8]] = &[
+        b"<p", b"<div", b"<h1", b"<h2", b"<h3", b"<h4", b"<h5", b"<h6", b"<li", b"<tr", b"<br",
+        b"<P", b"<DIV", b"<BR",
+    ];
     for &t in BLOCK {
         if pos + t.len() <= src.len() && &src[pos..pos + t.len()] == t {
             return true;
@@ -300,8 +338,9 @@ fn clean_text(src: &[u8], dst: &mut [u8], opts: &ExtractOpts) -> usize {
         let b = src[i];
 
         // Убираем URL: http... до пробела
-        if opts.remove_urls && i + 4 < src.len()
-            && (&src[i..i+7] == b"http://" || &src[i..i+8] == b"https://")
+        if opts.remove_urls
+            && i + 4 < src.len()
+            && (&src[i..i + 7] == b"http://" || &src[i..i + 8] == b"https://")
         {
             while i < src.len() && src[i] != b' ' && src[i] != b'\n' && src[i] != b'\t' {
                 i += 1;
@@ -363,10 +402,13 @@ fn starts_with_str(data: &[u8], pat: &str) -> bool {
 }
 
 fn contains_bytes(data: &[u8], pat: &[u8]) -> bool {
-    if pat.len() > data.len() { return false; }
+    if pat.len() > data.len() {
+        return false;
+    }
     for i in 0..=(data.len() - pat.len()) {
-        if &data[i..i + pat.len()] == pat { return true; }
+        if &data[i..i + pat.len()] == pat {
+            return true;
+        }
     }
     false
 }
-

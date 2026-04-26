@@ -27,8 +27,8 @@ pub enum WadType {
 /// Заголовок WAD-файла (12 байт)
 #[derive(Debug, Clone, Copy)]
 pub struct WadHeader {
-    pub wad_type:   WadType,
-    pub num_lumps:  u32,
+    pub wad_type: WadType,
+    pub num_lumps: u32,
     pub dir_offset: u32,
 }
 
@@ -36,8 +36,8 @@ pub struct WadHeader {
 #[derive(Debug, Clone, Copy)]
 pub struct LumpInfo {
     pub filepos: u32,
-    pub size:    u32,
-    pub name:    [u8; 8],
+    pub size: u32,
+    pub name: [u8; 8],
 }
 
 impl LumpInfo {
@@ -49,15 +49,21 @@ impl LumpInfo {
 
     /// Сравнивает имя lump с ASCII-строкой (case-insensitive)
     pub fn name_matches(&self, s: &[u8]) -> bool {
-        if s.len() > 8 { return false; }
+        if s.len() > 8 {
+            return false;
+        }
         for (i, &b) in s.iter().enumerate() {
             let a = self.name[i].to_ascii_uppercase();
             let b = b.to_ascii_uppercase();
-            if a != b { return false; }
+            if a != b {
+                return false;
+            }
         }
         // Остаток имени lump должен быть нулём или совпадать
         for i in s.len()..8 {
-            if self.name[i] != 0 { return false; }
+            if self.name[i] != 0 {
+                return false;
+            }
         }
         true
     }
@@ -69,9 +75,9 @@ impl LumpInfo {
 
 /// Разбирает WAD-данные из сырого байтового среза.
 pub struct WadReader {
-    data:   &'static [u8],
+    data: &'static [u8],
     header: WadHeader,
-    lumps:  Vec<LumpInfo>,
+    lumps: Vec<LumpInfo>,
 }
 
 impl WadReader {
@@ -86,10 +92,10 @@ impl WadReader {
         let wad_type = match &data[0..4] {
             b"IWAD" => WadType::IWad,
             b"PWAD" => WadType::PWad,
-            _       => return None,
+            _ => return None,
         };
 
-        let num_lumps  = read_u32_le(data, 4);
+        let num_lumps = read_u32_le(data, 4);
         let dir_offset = read_u32_le(data, 8);
 
         // Проверяем что директория помещается в файл
@@ -98,29 +104,45 @@ impl WadReader {
             return None;
         }
 
-        let header = WadHeader { wad_type, num_lumps, dir_offset };
+        let header = WadHeader {
+            wad_type,
+            num_lumps,
+            dir_offset,
+        };
 
         // Читаем директорию в Vec
         let mut lumps = Vec::with_capacity(num_lumps as usize);
         for i in 0..num_lumps as usize {
             let base = dir_offset as usize + i * 16;
             let filepos = read_u32_le(data, base);
-            let size    = read_u32_le(data, base + 4);
+            let size = read_u32_le(data, base + 4);
 
             let mut name = [0u8; 8];
             name.copy_from_slice(&data[base + 8..base + 16]);
 
-            lumps.push(LumpInfo { filepos, size, name });
+            lumps.push(LumpInfo {
+                filepos,
+                size,
+                name,
+            });
         }
 
-        Some(WadReader { data, header, lumps })
+        Some(WadReader {
+            data,
+            header,
+            lumps,
+        })
     }
 
     /// Тип WAD (IWAD / PWAD)
-    pub fn wad_type(&self) -> WadType { self.header.wad_type }
+    pub fn wad_type(&self) -> WadType {
+        self.header.wad_type
+    }
 
     /// Количество lump-ов
-    pub fn num_lumps(&self) -> usize { self.lumps.len() }
+    pub fn num_lumps(&self) -> usize {
+        self.lumps.len()
+    }
 
     /// Находит индекс первого lump с заданным именем.
     pub fn find_lump(&self, name: &[u8]) -> Option<usize> {
@@ -131,8 +153,10 @@ impl WadReader {
     pub fn lump_data(&self, index: usize) -> Option<&'static [u8]> {
         let info = self.lumps.get(index)?;
         let start = info.filepos as usize;
-        let end   = start + info.size as usize;
-        if end > self.data.len() { return None; }
+        let end = start + info.size as usize;
+        if end > self.data.len() {
+            return None;
+        }
         Some(&self.data[start..end])
     }
 
@@ -148,7 +172,9 @@ impl WadReader {
     }
 
     /// Список всех lump (для отладки / статуса)
-    pub fn lumps(&self) -> &[LumpInfo] { self.lumps.as_slice() }
+    pub fn lumps(&self) -> &[LumpInfo] {
+        self.lumps.as_slice()
+    }
 }
 
 // ============================================================
@@ -159,10 +185,7 @@ impl WadReader {
 #[inline]
 fn read_u32_le(data: &[u8], offset: usize) -> u32 {
     let b = &data[offset..offset + 4];
-    (b[0] as u32)
-        | ((b[1] as u32) << 8)
-        | ((b[2] as u32) << 16)
-        | ((b[3] as u32) << 24)
+    (b[0] as u32) | ((b[1] as u32) << 8) | ((b[2] as u32) << 16) | ((b[3] as u32) << 24)
 }
 
 // ============================================================
@@ -183,7 +206,9 @@ pub fn wad_data() -> Option<&'static [u8]> {
 pub fn load(data: &'static [u8]) {
     // SAFETY: вызывается один раз из doom::init() до start game loop.
     // &'static гарантирует что данные живут до конца программы.
-    unsafe { WAD_DATA = Some(data); }
+    unsafe {
+        WAD_DATA = Some(data);
+    }
 }
 
 /// Возвращает WadReader если WAD загружен.
@@ -193,4 +218,3 @@ pub fn reader() -> Option<WadReader> {
     // для многократных вызовов предпочтительно кешировать результат.
     unsafe { WAD_DATA.and_then(WadReader::new) }
 }
-

@@ -42,7 +42,9 @@ static mut SLOT_USED: [usize; MAX_SLOTS] = [0; MAX_SLOTS];
 pub fn find_free_slot() -> Option<usize> {
     unsafe {
         for i in 0..MAX_SLOTS {
-            if !SLOT_OCCUPIED[i] { return Some(i); }
+            if !SLOT_OCCUPIED[i] {
+                return Some(i);
+            }
         }
         None
     }
@@ -72,14 +74,22 @@ pub fn free_count() -> usize {
 ///
 /// Возвращает false если слот занят или данные слишком большие.
 pub fn install_to_slot(slot: usize, data: &[u8]) -> bool {
-    if slot >= MAX_SLOTS { return false; }
-    if data.len() > SLOT_SIZE { return false; }
+    if slot >= MAX_SLOTS {
+        return false;
+    }
+    if data.len() > SLOT_SIZE {
+        return false;
+    }
 
     unsafe {
-        if SLOT_OCCUPIED[slot] { return false; }
+        if SLOT_OCCUPIED[slot] {
+            return false;
+        }
 
         // Очищаем слот (BSS-секция)
-        for b in APP_MEMORY[slot].iter_mut() { *b = 0; }
+        for b in APP_MEMORY[slot].iter_mut() {
+            *b = 0;
+        }
 
         // Копируем данные
         APP_MEMORY[slot][..data.len()].copy_from_slice(data);
@@ -94,13 +104,19 @@ pub fn install_to_slot(slot: usize, data: &[u8]) -> bool {
 ///
 /// Аналог: Windows Uninstall → удаление папки из Program Files.
 pub fn uninstall_slot(slot: usize) -> bool {
-    if slot >= MAX_SLOTS { return false; }
+    if slot >= MAX_SLOTS {
+        return false;
+    }
 
     unsafe {
-        if !SLOT_OCCUPIED[slot] { return false; }
+        if !SLOT_OCCUPIED[slot] {
+            return false;
+        }
 
         // Обнуляем (секьюрное удаление — не оставляем данные)
-        for b in APP_MEMORY[slot].iter_mut() { *b = 0; }
+        for b in APP_MEMORY[slot].iter_mut() {
+            *b = 0;
+        }
         SLOT_USED[slot] = 0;
         SLOT_OCCUPIED[slot] = false;
     }
@@ -110,7 +126,9 @@ pub fn uninstall_slot(slot: usize) -> bool {
 
 /// Проверяет занятость слота.
 pub fn is_occupied(slot: usize) -> bool {
-    if slot >= MAX_SLOTS { return false; }
+    if slot >= MAX_SLOTS {
+        return false;
+    }
     unsafe { SLOT_OCCUPIED[slot] }
 }
 
@@ -119,15 +137,21 @@ pub fn is_occupied(slot: usize) -> bool {
 /// SAFETY: возвращает &[u8] на статическую память в BSS.
 /// Вызывающий не должен удерживать ссылку через uninstall_slot().
 pub fn read_slot(slot: usize) -> Option<&'static [u8]> {
-    if slot >= MAX_SLOTS { return None; }
+    if slot >= MAX_SLOTS {
+        return None;
+    }
     unsafe {
-        if !SLOT_OCCUPIED[slot] { return None; }
+        if !SLOT_OCCUPIED[slot] {
+            return None;
+        }
         Some(&APP_MEMORY[slot][..SLOT_USED[slot]])
     }
 }
 
 /// Возвращает размер данных в слоте.
 pub fn slot_used_bytes(slot: usize) -> usize {
-    if slot >= MAX_SLOTS { return 0; }
+    if slot >= MAX_SLOTS {
+        return 0;
+    }
     unsafe { SLOT_USED[slot] }
 }

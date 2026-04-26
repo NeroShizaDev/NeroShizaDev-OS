@@ -31,7 +31,7 @@ pub const JKL_MAGIC: [u8; 4] = [b'J', b'K', b'L', 0x01];
 pub const JKL_HEADER_SIZE: usize = 22;
 
 pub const ALG_STORE: u8 = 0;
-pub const ALG_RLE:   u8 = 1;
+pub const ALG_RLE: u8 = 1;
 pub const ALG_DELTA: u8 = 2;
 
 // Максимальный размер выходного буфера (in-kernel: статический)
@@ -59,12 +59,12 @@ impl EncodedBlock {
     /// Константный конструктор для инициализации static-буфера в ядре.
     pub const fn new() -> Self {
         Self {
-            algorithm:     ALG_STORE,
-            kind:          FileKind::Unknown,
+            algorithm: ALG_STORE,
+            kind: FileKind::Unknown,
             original_size: 0,
-            encoded_size:  0,
-            ratio_milli:   1000,
-            buf:           [0u8; MAX_ENCODED],
+            encoded_size: 0,
+            ratio_milli: 1000,
+            buf: [0u8; MAX_ENCODED],
         }
     }
 
@@ -135,37 +135,56 @@ pub fn encode(data: &[u8], report: &Report) -> EncodedBlock {
 /// Кодирует `data` в существующий `block` (без выделения на стеке).
 /// Для использования со static-буферами в ядре.
 pub fn encode_into(data: &[u8], report: &Report, block: &mut EncodedBlock) {
-    block.kind          = report.classification;
+    block.kind = report.classification;
     block.original_size = data.len() as u64;
-    block.algorithm     = ALG_STORE;
-    block.encoded_size  = 0;
-    block.ratio_milli   = 1000;
+    block.algorithm = ALG_STORE;
+    block.encoded_size = 0;
+    block.ratio_milli = 1000;
 
-    if data.is_empty() { return; }
+    if data.is_empty() {
+        return;
+    }
 
     let (algorithm, encoded_len) = match report.classification {
         FileKind::Text => {
             let n = rle_encode(data, &mut block.buf);
-            if n < data.len() { (ALG_RLE, n) } else { store(data, &mut block.buf); (ALG_STORE, data.len()) }
+            if n < data.len() {
+                (ALG_RLE, n)
+            } else {
+                store(data, &mut block.buf);
+                (ALG_STORE, data.len())
+            }
         }
         FileKind::Structured => {
             let n = delta_encode(data, &mut block.buf);
-            if n < data.len() { (ALG_DELTA, n) } else { store(data, &mut block.buf); (ALG_STORE, data.len()) }
+            if n < data.len() {
+                (ALG_DELTA, n)
+            } else {
+                store(data, &mut block.buf);
+                (ALG_STORE, data.len())
+            }
         }
-        _ => { store(data, &mut block.buf); (ALG_STORE, data.len()) }
+        _ => {
+            store(data, &mut block.buf);
+            (ALG_STORE, data.len())
+        }
     };
 
-    block.algorithm    = algorithm;
+    block.algorithm = algorithm;
     block.encoded_size = encoded_len as u64;
-    block.ratio_milli  = if block.original_size > 0 {
+    block.ratio_milli = if block.original_size > 0 {
         ((block.encoded_size * 1000) / block.original_size) as u32
-    } else { 1000 };
+    } else {
+        1000
+    };
 }
 
 /// Записывает полный .jkl-заголовок в начало буфера `out` (22 байта).
 /// Возвращает смещение после заголовка.
 pub fn write_jkl_header(out: &mut [u8], block: &EncodedBlock) -> usize {
-    if out.len() < JKL_HEADER_SIZE { return 0; }
+    if out.len() < JKL_HEADER_SIZE {
+        return 0;
+    }
     out[0..4].copy_from_slice(&JKL_MAGIC);
     out[4] = kind_byte(block.kind);
     out[5] = block.algorithm;
@@ -176,13 +195,13 @@ pub fn write_jkl_header(out: &mut [u8], block: &EncodedBlock) -> usize {
 
 fn kind_byte(k: FileKind) -> u8 {
     match k {
-        FileKind::Text       => 0,
+        FileKind::Text => 0,
         FileKind::Executable => 1,
         FileKind::Compressed => 2,
-        FileKind::Random     => 3,
+        FileKind::Random => 3,
         FileKind::Structured => 4,
         FileKind::LossyMedia => 5,
-        FileKind::Unknown    => 6,
+        FileKind::Unknown => 6,
     }
 }
 
@@ -215,8 +234,10 @@ fn rle_encode(data: &[u8], out: &mut [u8; MAX_ENCODED]) -> usize {
         }
 
         if run >= 3 || out_pos + 2 <= MAX_ENCODED {
-            if out_pos + 2 > MAX_ENCODED { break; }
-            out[out_pos]     = run as u8;
+            if out_pos + 2 > MAX_ENCODED {
+                break;
+            }
+            out[out_pos] = run as u8;
             out[out_pos + 1] = b;
             out_pos += 2;
             pos += run;
@@ -234,7 +255,9 @@ fn rle_encode(data: &[u8], out: &mut [u8; MAX_ENCODED]) -> usize {
 // ============================================================
 fn delta_encode(data: &[u8], out: &mut [u8; MAX_ENCODED]) -> usize {
     let n = data.len().min(MAX_ENCODED);
-    if n == 0 { return 0; }
+    if n == 0 {
+        return 0;
+    }
     out[0] = data[0];
     for i in 1..n {
         out[i] = data[i].wrapping_sub(data[i - 1]);
@@ -250,7 +273,7 @@ pub fn decode_rle(encoded: &[u8], out: &mut [u8], out_len: usize) -> usize {
     let mut dst = 0usize;
     while src + 1 < encoded.len() && dst < out_len {
         let run = encoded[src] as usize;
-        let b   = encoded[src + 1];
+        let b = encoded[src + 1];
         src += 2;
         let put = run.min(out_len - dst);
         for i in 0..put {
@@ -263,11 +286,12 @@ pub fn decode_rle(encoded: &[u8], out: &mut [u8], out_len: usize) -> usize {
 
 pub fn decode_delta(encoded: &[u8], out: &mut [u8], out_len: usize) -> usize {
     let n = encoded.len().min(out_len);
-    if n == 0 { return 0; }
+    if n == 0 {
+        return 0;
+    }
     out[0] = encoded[0];
     for i in 1..n {
         out[i] = encoded[i].wrapping_add(out[i - 1]);
     }
     n
 }
-

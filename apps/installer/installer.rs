@@ -18,37 +18,37 @@
 //   `install` или `install demo` → installer::run(data, label)
 // ============================================================
 
-use x86_64::instructions::hlt;
-use super::header::{self, NhsHeader, NhsManifest, HEADER_SIZE, MANIFEST_SIZE};
 use super::crc32;
-use super::slots;
+use super::header::{self, HEADER_SIZE, MANIFEST_SIZE, NhsHeader, NhsManifest};
 use super::registry;
+use super::slots;
+use x86_64::instructions::hlt;
 
 // ── Результат установки ──────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallResult {
-    Ok(usize),          // успех, slot_index
-    BadMagic,           // не .nhs файл
-    BadChecksum,        // CRC32 не совпадает
-    TooLarge,           // > 64KB
-    NoFreeSlot,         // все 16 слотов заняты
-    BadManifest,        // manifest не читается
-    AlreadyInstalled,   // приложение с таким именем уже есть
-    UserCanceled,       // Esc в визарде
+    Ok(usize),        // успех, slot_index
+    BadMagic,         // не .nhs файл
+    BadChecksum,      // CRC32 не совпадает
+    TooLarge,         // > 64KB
+    NoFreeSlot,       // все 16 слотов заняты
+    BadManifest,      // manifest не читается
+    AlreadyInstalled, // приложение с таким именем уже есть
+    UserCanceled,     // Esc в визарде
 }
 
 impl InstallResult {
     pub fn description(self) -> &'static str {
         match self {
-            Self::Ok(_)            => "Installation complete",
-            Self::BadMagic         => "Bad magic: not a .nhs file",
-            Self::BadChecksum      => "CRC32 checksum mismatch",
-            Self::TooLarge         => "Package > 64KB (slot overflow)",
-            Self::NoFreeSlot       => "No free slots (16/16 used)",
-            Self::BadManifest      => "Corrupt manifest section",
+            Self::Ok(_) => "Installation complete",
+            Self::BadMagic => "Bad magic: not a .nhs file",
+            Self::BadChecksum => "CRC32 checksum mismatch",
+            Self::TooLarge => "Package > 64KB (slot overflow)",
+            Self::NoFreeSlot => "No free slots (16/16 used)",
+            Self::BadManifest => "Corrupt manifest section",
             Self::AlreadyInstalled => "App already installed",
-            Self::UserCanceled     => "Installation canceled by user",
+            Self::UserCanceled => "Installation canceled by user",
         }
     }
 }
@@ -58,48 +58,60 @@ impl InstallResult {
 const VGA: *mut u8 = 0xb8000 as *mut u8;
 
 unsafe fn put(row: usize, col: usize, ch: u8, color: u8) {
-    if row >= 25 || col >= 80 { return; }
+    if row >= 25 || col >= 80 {
+        return;
+    }
     let off = (row * 80 + col) * 2;
     core::ptr::write_volatile(VGA.add(off), ch);
     core::ptr::write_volatile(VGA.add(off + 1), color);
 }
 
 unsafe fn fill_seg(row: usize, col: usize, len: usize, color: u8) {
-    for c in 0..len { put(row, col + c, b' ', color); }
+    for c in 0..len {
+        put(row, col + c, b' ', color);
+    }
 }
 
 unsafe fn puts(row: usize, col: usize, s: &[u8], color: u8) {
-    for (i, &b) in s.iter().enumerate() { put(row, col + i, b, color); }
+    for (i, &b) in s.iter().enumerate() {
+        put(row, col + i, b, color);
+    }
 }
 
 unsafe fn fill_screen(color: u8) {
-    for r in 0..25usize { fill_seg(r, 0, 80, color); }
+    for r in 0..25usize {
+        fill_seg(r, 0, 80, color);
+    }
 }
 
 // ── Цвета (зелёная тема — как инсталлятор) ──────────────────
 
-const BG:     u8 = 0x20;  // Black on Green (фон)
-const BORDER: u8 = 0x2F;  // White on Green
-const TITLE:  u8 = 0x2E;  // Yellow on Green
-const FIELD:  u8 = 0x2F;  // White on Green
-const VALUE:  u8 = 0x2B;  // Cyan on Green
-const ERROR:  u8 = 0x4F;  // White on Red
-const OK:     u8 = 0x2A;  // LtGreen on Green
-const HINT:   u8 = 0x28;  // DkGray on Green
-const BAR_FG: u8 = 0x2A;  // LtGreen on Green (filled)
-const BAR_BG: u8 = 0x28;  // DkGray on Green (empty)
+const BG: u8 = 0x20; // Black on Green (фон)
+const BORDER: u8 = 0x2F; // White on Green
+const TITLE: u8 = 0x2E; // Yellow on Green
+const FIELD: u8 = 0x2F; // White on Green
+const VALUE: u8 = 0x2B; // Cyan on Green
+const ERROR: u8 = 0x4F; // White on Red
+const OK: u8 = 0x2A; // LtGreen on Green
+const HINT: u8 = 0x28; // DkGray on Green
+const BAR_FG: u8 = 0x2A; // LtGreen on Green (filled)
+const BAR_BG: u8 = 0x28; // DkGray on Green (empty)
 
 // ── CP437 box ────────────────────────────────────────────────
 
-const TL: u8 = 0xC9; const TR: u8 = 0xBB;
-const BL: u8 = 0xC8; const BR: u8 = 0xBC;
-const HZ: u8 = 0xCD; const VT: u8 = 0xBA;
-const ML: u8 = 0xCC; const MR: u8 = 0xB9;
+const TL: u8 = 0xC9;
+const TR: u8 = 0xBB;
+const BL: u8 = 0xC8;
+const BR: u8 = 0xBC;
+const HZ: u8 = 0xCD;
+const VT: u8 = 0xBA;
+const ML: u8 = 0xCC;
+const MR: u8 = 0xB9;
 
 // ── Layout ───────────────────────────────────────────────────
 
 const BOX_COL: usize = 16;
-const BOX_W:   usize = 47;
+const BOX_W: usize = 47;
 const BOX_ROW: usize = 3;
 
 // ============================================================
@@ -117,7 +129,7 @@ pub fn install(data: &[u8]) -> InstallResult {
     // ── Step 1: Parse header ─────────────────────────────────
     let hdr = match header::parse_header(data) {
         Some(h) => h,
-        None    => {
+        None => {
             show_error(b"Not a valid .nhs file", b"Magic bytes NHS\\x1A not found");
             wait_key();
             return InstallResult::BadMagic;
@@ -127,7 +139,7 @@ pub fn install(data: &[u8]) -> InstallResult {
     // ── Step 2: Parse manifest ───────────────────────────────
     let manifest = match header::parse_manifest(data, hdr.manifest_offset) {
         Some(m) => m,
-        None    => {
+        None => {
             show_error(b"Corrupt manifest", b"Cannot read app metadata");
             wait_key();
             return InstallResult::BadManifest;
@@ -156,8 +168,7 @@ pub fn install(data: &[u8]) -> InstallResult {
     }
 
     // ── Step 5: Check duplicate ──────────────────────────────
-    let name_end = manifest.app_name.iter()
-        .position(|&b| b == 0).unwrap_or(32);
+    let name_end = manifest.app_name.iter().position(|&b| b == 0).unwrap_or(32);
     if registry::find_by_name(&manifest.app_name[..name_end]).is_some() {
         show_error(b"Already installed", manifest.app_name[..name_end].as_ref());
         wait_key();
@@ -167,7 +178,7 @@ pub fn install(data: &[u8]) -> InstallResult {
     // ── Step 6: Find free slot ───────────────────────────────
     let slot = match slots::find_free_slot() {
         Some(s) => s,
-        None    => {
+        None => {
             show_error(b"No free slots", b"All 16 slots occupied");
             wait_key();
             return InstallResult::NoFreeSlot;
@@ -217,7 +228,9 @@ pub fn install(data: &[u8]) -> InstallResult {
 /// Удаляет установленное приложение.
 /// Аналог: "Программы и компоненты" → Удалить.
 pub fn uninstall(slot: usize) -> bool {
-    if !slots::is_occupied(slot) { return false; }
+    if !slots::is_occupied(slot) {
+        return false;
+    }
 
     let name = match registry::get(slot) {
         Some(r) => {
@@ -235,7 +248,10 @@ pub fn uninstall(slot: usize) -> bool {
     let name_end = name.iter().position(|&b| b == 0).unwrap_or(32);
     crate::locale::print_localized_fmt(
         0x0A,
-        format_args!("[NHS] Uninstalled: {}", core::str::from_utf8(&name[..name_end]).unwrap_or("?")),
+        format_args!(
+            "[NHS] Uninstalled: {}",
+            core::str::from_utf8(&name[..name_end]).unwrap_or("?")
+        ),
     );
 
     true
@@ -249,7 +265,9 @@ fn show_info_screen(
     hdr: &NhsHeader,
     manifest: &NhsManifest,
     slot: usize,
-    v_major: u8, v_minor: u8, v_patch: u8,
+    v_major: u8,
+    v_minor: u8,
+    v_patch: u8,
 ) {
     unsafe {
         fill_screen(BG);
@@ -272,13 +290,16 @@ fn show_info_screen(
 
         // Fields
         let mut row = BOX_ROW + 3;
-        field_row(row, b"Name:",    manifest.name_str().as_bytes());   row += 1;
-        field_row(row, b"Author:",  manifest.author_str().as_bytes()); row += 1;
+        field_row(row, b"Name:", manifest.name_str().as_bytes());
+        row += 1;
+        field_row(row, b"Author:", manifest.author_str().as_bytes());
+        row += 1;
 
         // Version: manual formatting (no format! in bare-metal for bytes)
         let mut vbuf = [0u8; 12];
         let vlen = fmt_version(&mut vbuf, v_major, v_minor, v_patch);
-        field_row(row, b"Version:", &vbuf[..vlen]); row += 1;
+        field_row(row, b"Version:", &vbuf[..vlen]);
+        row += 1;
 
         // Size
         let mut sbuf = [0u8; 12];
@@ -286,33 +307,42 @@ fn show_info_screen(
         // Append " bytes"
         let mut full = [0u8; 20];
         full[..slen].copy_from_slice(&sbuf[..slen]);
-        full[slen..slen+6].copy_from_slice(b" bytes");
-        field_row(row, b"Size:", &full[..slen + 6]); row += 1;
+        full[slen..slen + 6].copy_from_slice(b" bytes");
+        field_row(row, b"Size:", &full[..slen + 6]);
+        row += 1;
 
         // Slot
         let mut slbuf = [0u8; 4];
         let sllen = fmt_u32(&mut slbuf, slot as u32);
         let mut slfull = [0u8; 16];
         slfull[0] = b'#';
-        slfull[1..1+sllen].copy_from_slice(&slbuf[..sllen]);
+        slfull[1..1 + sllen].copy_from_slice(&slbuf[..sllen]);
         let rest = b" (free)";
-        slfull[1+sllen..1+sllen+rest.len()].copy_from_slice(rest);
-        field_row(row, b"Slot:", &slfull[..1+sllen+rest.len()]); row += 1;
+        slfull[1 + sllen..1 + sllen + rest.len()].copy_from_slice(rest);
+        field_row(row, b"Slot:", &slfull[..1 + sllen + rest.len()]);
+        row += 1;
 
         // Lumps
         let mut lbuf = [0u8; 4];
         let llen = fmt_u32(&mut lbuf, hdr.lump_count);
-        field_row(row, b"Lumps:", &lbuf[..llen]); row += 1;
+        field_row(row, b"Lumps:", &lbuf[..llen]);
+        row += 1;
 
         // Flags
-        field_row(row, b"Flags:", if hdr.flags & super::header::FLAG_HAS_SCRIPT != 0 {
-            b"NeroShizaScript"
-        } else {
-            b"native"
-        }); row += 1;
+        field_row(
+            row,
+            b"Flags:",
+            if hdr.flags & super::header::FLAG_HAS_SCRIPT != 0 {
+                b"NeroShizaScript"
+            } else {
+                b"native"
+            },
+        );
+        row += 1;
 
         // Empty + hint
-        blank_row(row); row += 1;
+        blank_row(row);
+        row += 1;
 
         // Buttons hint
         put(row, BOX_COL, VT, BORDER);
@@ -321,7 +351,12 @@ fn show_info_screen(
         put(row, BOX_COL + BOX_W + 1, VT, BORDER);
 
         // Bottom hint
-        puts(22, 20, b"NeroShizaDev-OS  \xB7  Hybrid Package Manager", HINT);
+        puts(
+            22,
+            20,
+            b"NeroShizaDev-OS  \xB7  Hybrid Package Manager",
+            HINT,
+        );
     }
 }
 
@@ -358,7 +393,7 @@ fn update_progress(pct: u32) {
         // [################............] 65%
         put(row, bar_start, b'[', FIELD);
         for i in 0..bar_len {
-            let ch = if i < filled { 0xDB } else { 0xB0 };  // █ vs ░
+            let ch = if i < filled { 0xDB } else { 0xB0 }; // █ vs ░
             let color = if i < filled { BAR_FG } else { BAR_BG };
             put(row, bar_start + 1 + i, ch, color);
         }
@@ -374,7 +409,9 @@ fn update_progress(pct: u32) {
     }
 
     // Fake delay for visual feedback
-    for _ in 0..5_000_000u64 { core::hint::spin_loop(); }
+    for _ in 0..5_000_000u64 {
+        core::hint::spin_loop();
+    }
 }
 
 fn show_success_screen(manifest: &NhsManifest, slot: usize, size: usize) {
@@ -391,7 +428,7 @@ fn show_success_screen(manifest: &NhsManifest, slot: usize, size: usize) {
 
         div_row(row + 1);
 
-        field_row(row + 2, b"App:",  manifest.name_str().as_bytes());
+        field_row(row + 2, b"App:", manifest.name_str().as_bytes());
 
         let mut sbuf = [0u8; 4];
         let slen = fmt_u32(&mut sbuf, slot as u32);
@@ -401,14 +438,19 @@ fn show_success_screen(manifest: &NhsManifest, slot: usize, size: usize) {
         let zlen = fmt_u32(&mut zbuf, size as u32);
         let mut zfull = [0u8; 20];
         zfull[..zlen].copy_from_slice(&zbuf[..zlen]);
-        zfull[zlen..zlen+6].copy_from_slice(b" bytes");
+        zfull[zlen..zlen + 6].copy_from_slice(b" bytes");
         field_row(row + 4, b"Size:", &zfull[..zlen + 6]);
 
         blank_row(row + 5);
 
         put(row + 6, BOX_COL, VT, BORDER);
         fill_seg(row + 6, BOX_COL + 1, BOX_W, BG);
-        puts(row + 6, BOX_COL + 5, b"Stored in NHS registry and slot", HINT);
+        puts(
+            row + 6,
+            BOX_COL + 5,
+            b"Stored in NHS registry and slot",
+            HINT,
+        );
         put(row + 6, BOX_COL + BOX_W + 1, VT, BORDER);
 
         puts(22, 25, b"Press any key to continue...", HINT);
@@ -448,7 +490,9 @@ fn show_error(title: &[u8], detail: &[u8]) {
 unsafe fn draw_box(top: usize, col: usize, w: usize, h: usize) {
     // Top border
     put(top, col, TL, BORDER);
-    for c in 1..=w { put(top, col + c, HZ, BORDER); }
+    for c in 1..=w {
+        put(top, col + c, HZ, BORDER);
+    }
     put(top, col + w + 1, TR, BORDER);
 
     // Sides
@@ -459,13 +503,17 @@ unsafe fn draw_box(top: usize, col: usize, w: usize, h: usize) {
 
     // Bottom border
     put(top + h, col, BL, BORDER);
-    for c in 1..=w { put(top + h, col + c, HZ, BORDER); }
+    for c in 1..=w {
+        put(top + h, col + c, HZ, BORDER);
+    }
     put(top + h, col + w + 1, BR, BORDER);
 }
 
 unsafe fn div_row(row: usize) {
     put(row, BOX_COL, ML, BORDER);
-    for c in 1..=BOX_W { put(row, BOX_COL + c, HZ, BORDER); }
+    for c in 1..=BOX_W {
+        put(row, BOX_COL + c, HZ, BORDER);
+    }
     put(row, BOX_COL + BOX_W + 1, MR, BORDER);
 }
 
@@ -493,7 +541,9 @@ fn wait_key() {
         loop {
             if crate::ps2::has_scancode() {
                 let sc = crate::ps2::read_scancode();
-                if sc & 0x80 == 0 { break; }
+                if sc & 0x80 == 0 {
+                    break;
+                }
             }
             hlt();
         }
@@ -506,10 +556,12 @@ fn wait_confirm() -> bool {
         loop {
             if crate::ps2::has_scancode() {
                 let sc = crate::ps2::read_scancode();
-                if sc & 0x80 != 0 { continue; }
+                if sc & 0x80 != 0 {
+                    continue;
+                }
                 match sc {
-                    0x1C => return true,   // Enter
-                    0x01 => return false,  // Esc
+                    0x1C => return true,  // Enter
+                    0x01 => return false, // Esc
                     _ => {}
                 }
             }
@@ -521,21 +573,32 @@ fn wait_confirm() -> bool {
 // ── Formatting (no alloc) ────────────────────────────────────
 
 fn fmt_u32(buf: &mut [u8], val: u32) -> usize {
-    if val == 0 { buf[0] = b'0'; return 1; }
+    if val == 0 {
+        buf[0] = b'0';
+        return 1;
+    }
     let mut tmp = [0u8; 10];
     let mut n = 0usize;
     let mut v = val;
-    while v > 0 { tmp[n] = b'0' + (v % 10) as u8; v /= 10; n += 1; }
-    for i in 0..n { buf[i] = tmp[n - 1 - i]; }
+    while v > 0 {
+        tmp[n] = b'0' + (v % 10) as u8;
+        v /= 10;
+        n += 1;
+    }
+    for i in 0..n {
+        buf[i] = tmp[n - 1 - i];
+    }
     n
 }
 
 fn fmt_version(buf: &mut [u8], major: u8, minor: u8, patch: u8) -> usize {
     let mut pos = 0;
     pos += fmt_u32(&mut buf[pos..], major as u32);
-    buf[pos] = b'.'; pos += 1;
+    buf[pos] = b'.';
+    pos += 1;
     pos += fmt_u32(&mut buf[pos..], minor as u32);
-    buf[pos] = b'.'; pos += 1;
+    buf[pos] = b'.';
+    pos += 1;
     pos += fmt_u32(&mut buf[pos..], patch as u32);
     pos
 }

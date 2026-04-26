@@ -13,7 +13,7 @@
 
 #![allow(dead_code)]
 
-use super::analyzer::{self, FileKind, Report, AUTOCORR_PERIODS};
+use super::analyzer::{self, AUTOCORR_PERIODS, FileKind, Report};
 use crate::apps::jackal::encoder;
 use crate::apps::jackal::tools::archive;
 use crate::apps::jackal::tools::validate;
@@ -23,10 +23,10 @@ use crate::apps::jackal::tools::validate;
 // ============================================================
 // EncodedBlock = 256 КБ, Archive = 16×64 КБ = ~1 МБ.
 // Всё это убивает ядровой стек — переносим в BSS.
-static mut S_BLOCK:  encoder::EncodedBlock = encoder::EncodedBlock::new();
-static mut S_JKL:    [u8; encoder::JKL_HEADER_SIZE + encoder::MAX_ENCODED]
-                   = [0u8; encoder::JKL_HEADER_SIZE + encoder::MAX_ENCODED];
-static mut S_ARCH:   archive::Archive = archive::Archive::new();
+static mut S_BLOCK: encoder::EncodedBlock = encoder::EncodedBlock::new();
+static mut S_JKL: [u8; encoder::JKL_HEADER_SIZE + encoder::MAX_ENCODED] =
+    [0u8; encoder::JKL_HEADER_SIZE + encoder::MAX_ENCODED];
+static mut S_ARCH: archive::Archive = archive::Archive::new();
 static mut S_UNPACK: archive::Archive = archive::Archive::new();
 static mut S_PACKED: [u8; 8 * 1024] = [0u8; 8 * 1024]; // был на стеке → DF
 
@@ -75,12 +75,16 @@ fn print_stats(report: &Report) {
 }
 
 fn print_block_profile(report: &Report) {
-    if report.profile.block_count == 0 { return; }
+    if report.profile.block_count == 0 {
+        return;
+    }
     let (mn, mx) = report.profile.range();
     let trans = report.profile.transition_count();
     crate::user_messages::print_jackal_profile_summary(
         report.profile.block_count as u32,
-        mn, mx, trans,
+        mn,
+        mx,
+        trans,
     );
 
     // Рисуем sparkline высотой 8 строк (ниже — плотнее)
@@ -104,32 +108,33 @@ fn print_autocorr(report: &Report) {
     let pct_int = best_v / 100;
     let pct_frac = best_v % 100;
     crate::user_messages::print_jackal_autocorr_summary(
-        best_p as u32, pct_int as u32, pct_frac as u32,
+        best_p as u32,
+        pct_int as u32,
+        pct_frac as u32,
     );
 
     // Полная таблица периодов
     for (i, &p) in AUTOCORR_PERIODS.iter().enumerate() {
         let v = report.autocorr.match_bp[i];
         crate::user_messages::print_jackal_autocorr_row(
-            p as u32, (v / 100) as u32, (v % 100) as u32,
+            p as u32,
+            (v / 100) as u32,
+            (v % 100) as u32,
         );
     }
 }
 
 fn print_classification(report: &Report) {
     let kind_name = match report.classification {
-        FileKind::Text       => "TEXT",
+        FileKind::Text => "TEXT",
         FileKind::Executable => "EXECUTABLE",
         FileKind::Compressed => "COMPRESSED",
-        FileKind::Random     => "RANDOM",
+        FileKind::Random => "RANDOM",
         FileKind::Structured => "STRUCTURED",
         FileKind::LossyMedia => "LOSSY MEDIA",
-        FileKind::Unknown    => "UNKNOWN",
+        FileKind::Unknown => "UNKNOWN",
     };
-    crate::user_messages::print_jackal_classification(
-        kind_name,
-        report.confidence_milli,
-    );
+    crate::user_messages::print_jackal_classification(kind_name, report.confidence_milli);
 }
 
 fn print_voodoo_bridge(report: &Report) {
@@ -184,26 +189,23 @@ pub fn run_demo() {
     crate::trace::record("jackal analyze for encode done");
     unsafe {
         crate::trace::record("jackal encode_into start");
-        encoder::encode_into(DEMO_DATA, &report,
-            &mut *core::ptr::addr_of_mut!(S_BLOCK));
+        encoder::encode_into(DEMO_DATA, &report, &mut *core::ptr::addr_of_mut!(S_BLOCK));
         crate::trace::record("jackal encode_into done");
     }
 
     crate::locale::print_localized_line("", 0x07);
-    unsafe { print_encoder_result(&*core::ptr::addr_of!(S_BLOCK)); }
+    unsafe {
+        print_encoder_result(&*core::ptr::addr_of!(S_BLOCK));
+    }
 
     let (header_len, payload_len) = unsafe {
         crate::trace::record("jackal jkl header build start");
         let block = &*core::ptr::addr_of!(S_BLOCK);
-        let jkl   = &mut *core::ptr::addr_of_mut!(S_JKL);
+        let jkl = &mut *core::ptr::addr_of_mut!(S_JKL);
         let hl = encoder::write_jkl_header(jkl, block);
         let pl = block.encoded_size as usize;
         if hl > 0 && hl + pl <= jkl.len() {
-            core::ptr::copy_nonoverlapping(
-                block.buf.as_ptr(),
-                jkl[hl..].as_mut_ptr(),
-                pl,
-            );
+            core::ptr::copy_nonoverlapping(block.buf.as_ptr(), jkl[hl..].as_mut_ptr(), pl);
         }
         crate::trace::record("jackal jkl header build done");
         (hl, pl)
@@ -217,7 +219,10 @@ pub fn run_demo() {
             validate::validate(&jkl[..header_len + payload_len])
         };
         crate::trace::record("jackal validate jkl done");
-        crate::locale::print_localized_fmt(0x0B, format_args!("[VALIDATE] {}", status.description()));
+        crate::locale::print_localized_fmt(
+            0x0B,
+            format_args!("[VALIDATE] {}", status.description()),
+        );
         unsafe {
             crate::trace::record("jackal archive roundtrip start");
             let jkl = &*core::ptr::addr_of!(S_JKL);
@@ -249,7 +254,10 @@ unsafe fn demo_archive_roundtrip(jkl: &[u8]) {
         return;
     }
 
-    let packed_len = archive::pack(&*core::ptr::addr_of!(S_ARCH), &mut *core::ptr::addr_of_mut!(S_PACKED));
+    let packed_len = archive::pack(
+        &*core::ptr::addr_of!(S_ARCH),
+        &mut *core::ptr::addr_of_mut!(S_PACKED),
+    );
     crate::trace::record("jackal arch pack done");
     if packed_len == 0 {
         crate::locale::print_localized_line("[ARCH] pack failed", 0x0C);
@@ -260,21 +268,31 @@ unsafe fn demo_archive_roundtrip(jkl: &[u8]) {
     let status = validate::validate(packed_slice);
     crate::locale::print_localized_fmt(
         0x0B,
-        format_args!("[ARCH] validate={} bytes={}", status.description(), packed_len),
+        format_args!(
+            "[ARCH] validate={} bytes={}",
+            status.description(),
+            packed_len
+        ),
     );
 
     match archive::unpack_into(packed_slice, &mut *core::ptr::addr_of_mut!(S_UNPACK)) {
         Ok(()) => {
             crate::trace::record("jackal arch unpack ok");
             let unpacked = &*core::ptr::addr_of!(S_UNPACK);
-            crate::locale::print_localized_fmt(0x0A, format_args!("[ARCH] blocks={}", unpacked.count));
+            crate::locale::print_localized_fmt(
+                0x0A,
+                format_args!("[ARCH] blocks={}", unpacked.count),
+            );
             for i in 0..unpacked.count {
                 let b = &unpacked.blocks[i];
                 crate::locale::print_localized_fmt(
                     0x07,
                     format_args!(
                         "[ARCH] {} alg={} raw={} enc={}",
-                        b.name_str(), b.algorithm, b.original_size, b.data_len
+                        b.name_str(),
+                        b.algorithm,
+                        b.original_size,
+                        b.data_len
                     ),
                 );
             }
@@ -289,17 +307,26 @@ unsafe fn demo_archive_roundtrip(jkl: &[u8]) {
 fn print_encoder_result(block: &encoder::EncodedBlock) {
     let alg_name = match block.algorithm {
         encoder::ALG_STORE => "STORE",
-        encoder::ALG_RLE   => "RLE",
+        encoder::ALG_RLE => "RLE",
         encoder::ALG_DELTA => "DELTA",
-        _                  => "?",
+        _ => "?",
     };
     crate::locale::print_localized_line("--- ENCODER RESULT ---", 0x0B);
     crate::locale::print_localized_fmt(0x0F, format_args!("[ENC] Algorithm : {}", alg_name));
-    crate::locale::print_localized_fmt(0x07, format_args!("[ENC] Original  : {} bytes", block.original_size));
-    crate::locale::print_localized_fmt(0x07, format_args!("[ENC] Encoded   : {} bytes", block.encoded_size));
-    let ratio_int  = block.ratio_milli / 10;
+    crate::locale::print_localized_fmt(
+        0x07,
+        format_args!("[ENC] Original  : {} bytes", block.original_size),
+    );
+    crate::locale::print_localized_fmt(
+        0x07,
+        format_args!("[ENC] Encoded   : {} bytes", block.encoded_size),
+    );
+    let ratio_int = block.ratio_milli / 10;
     let ratio_frac = block.ratio_milli % 10;
-    crate::locale::print_localized_fmt(0x0A, format_args!("[ENC] Ratio     : {}.{}%", ratio_int, ratio_frac));
+    crate::locale::print_localized_fmt(
+        0x0A,
+        format_args!("[ENC] Ratio     : {}.{}%", ratio_int, ratio_frac),
+    );
 }
 
 fn wait_key() {
@@ -308,11 +335,11 @@ fn wait_key() {
         loop {
             if crate::ps2::has_scancode() {
                 let sc = crate::ps2::read_scancode();
-                if sc & 0x80 == 0 { break; }
+                if sc & 0x80 == 0 {
+                    break;
+                }
             }
             hlt();
         }
     }
 }
-
-

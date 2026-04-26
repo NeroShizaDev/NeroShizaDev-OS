@@ -66,5 +66,3 @@ pub fn violation_count() -> u64 {
 pub fn reset_counters() {
     VIOLATION_COUNT.store(0, Ordering::Release);
 }
-
-

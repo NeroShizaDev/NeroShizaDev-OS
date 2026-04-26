@@ -5,8 +5,8 @@
 #![reexport_test_harness_main = "test_main"]
 
 use core::panic::PanicInfo;
-use x86_64::instructions::port::Port;
 use x86_64::VirtAddr;
+use x86_64::instructions::port::Port;
 
 use bootloader_api::BootInfo;
 use bootloader_api::config::{BootloaderConfig, Mapping};
@@ -36,7 +36,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // ПЕРВЫМ ДЕЛОМ — инициализируем кучу (bump-аллокатор в BSS).
     // Без этого любой вызов alloc (Vec, Box, format!) возвращает null →
     // page fault → double fault → triple fault → QEMU [Paused].
-    blog_os::doom::stubs::init_heap();
+    blog_os::apps::games::doom::stubs::init_heap();
     blog_os::serial_println!("[ЯДРО] Куча инициализирована");
     blog_os::trace::record("heap initialized");
 
@@ -56,11 +56,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         .expect("bootloader did not map physical memory");
     let phys_offset_addr = VirtAddr::new(phys_offset);
     let mut mapper = unsafe { blog_os::memory::init(phys_offset_addr) };
-    let mut frame_allocator = unsafe {
-        blog_os::memory::BootInfoFrameAllocator::init(&boot_info.memory_regions)
-    };
+    let mut frame_allocator =
+        unsafe { blog_os::memory::BootInfoFrameAllocator::init(&boot_info.memory_regions) };
     blog_os::memory::map_vga_memory(&mut mapper, &mut frame_allocator);
-    unsafe { blog_os::vga_hw::force_text_mode_3(); }
+    unsafe {
+        blog_os::vga_hw::force_text_mode_3();
+    }
     blog_os::serial_println!("[ЯДРО] Фаза 0: VGA замаплена + текстовый режим 3");
     blog_os::trace::record("vga mapped + text mode");
 
@@ -80,12 +81,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // probe_vga() внутри проверяет порт 0x3DA перед записью в CRTC.
     let vga_mode = blog_os::vga_hw::detect_and_switch();
     match blog_os::locale::get_locale() {
-        blog_os::kernel_messages::Locale::RuRu =>
-            blog_os::locale::print_localized_fmt(0x0E, format_args!("[Фаза 1] VGA: {:?}", vga_mode)),
-        blog_os::kernel_messages::Locale::EnUs =>
-            blog_os::locale::print_localized_fmt(0x0E, format_args!("[Phase 1] VGA: {:?}", vga_mode)),
-        blog_os::kernel_messages::Locale::ArEg =>
-            blog_os::locale::print_localized_fmt(0x0E, format_args!("[المرحلة 1] VGA: {:?}", vga_mode)),
+        blog_os::kernel_messages::Locale::RuRu => {
+            blog_os::locale::print_localized_fmt(0x0E, format_args!("[Фаза 1] VGA: {:?}", vga_mode))
+        }
+        blog_os::kernel_messages::Locale::EnUs => blog_os::locale::print_localized_fmt(
+            0x0E,
+            format_args!("[Phase 1] VGA: {:?}", vga_mode),
+        ),
+        blog_os::kernel_messages::Locale::ArEg => blog_os::locale::print_localized_fmt(
+            0x0E,
+            format_args!("[المرحلة 1] VGA: {:?}", vga_mode),
+        ),
     }
     blog_os::serial_println!("[ЯДРО] Фаза 1: VGA детект завершён, режим: {:?}", vga_mode);
     blog_os::trace::record("vga detect complete");
@@ -97,18 +103,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     blog_os::init();
     blog_os::serial_println!("[ЯДРО] Фаза 2: GDT + IDT + PICS + FPU готовы");
     blog_os::trace::record("gdt idt pics fpu ready");
-    blog_os::locale::print_boot_status(
-        blog_os::user_messages::current(blog_os::user_messages::UiText::Phase2CpuOk),
-    );
+    blog_os::locale::print_boot_status(blog_os::user_messages::current(
+        blog_os::user_messages::UiText::Phase2CpuOk,
+    ));
 
     // ============================================================
     // ФАЗА 3: Память
     // Физическая память и куча инициализированы загрузчиком (bootimage).
     // При необходимости здесь будет memory::init(physical_offset).
     // ============================================================
-    blog_os::locale::print_boot_status(
-        blog_os::user_messages::current(blog_os::user_messages::UiText::Phase3MemoryOk),
-    );
+    blog_os::locale::print_boot_status(blog_os::user_messages::current(
+        blog_os::user_messages::UiText::Phase3MemoryOk,
+    ));
     blog_os::serial_println!("[ЯДРО] Фаза 3: Память ОК");
 
     // ============================================================
@@ -118,10 +124,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // ============================================================
     blog_os::rtc::display_status();
     blog_os::rtc::display_thermal();
+    let risk = blog_os::validator::probe_pre_freeze_risks();
+    blog_os::validator::display_pre_freeze_risks(&risk);
     blog_os::trace::record("rtc validator phase done");
 
     let rng_ok = blog_os::rng::is_supported();
-    blog_os::serial_println!("[ЯДРО] Фаза 4: RDRAND {}", if rng_ok { "ВКЛ" } else { "ВЫКЛ" });
+    blog_os::serial_println!(
+        "[ЯДРО] Фаза 4: RDRAND {}",
+        if rng_ok { "ВКЛ" } else { "ВЫКЛ" }
+    );
     blog_os::locale::print_localized_line(
         blog_os::user_messages::current(if rng_ok {
             blog_os::user_messages::UiText::Phase4RngOn
@@ -142,9 +153,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     if blog_os::validator::probe_speaker() {
         blog_os::serial_println!("[ЯДРО] Фаза 5: Спикер ОК");
-        blog_os::locale::print_boot_status(
-            blog_os::user_messages::current(blog_os::user_messages::UiText::Phase5SpeakerOk),
-        );
+        blog_os::locale::print_boot_status(blog_os::user_messages::current(
+            blog_os::user_messages::UiText::Phase5SpeakerOk,
+        ));
         boot_beep();
     } else {
         blog_os::serial_println!("[ЯДРО] Фаза 5: Спикер НЕ НАЙДЕН");
@@ -158,7 +169,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // ФАЗА 6: Мультиязычность и Рендеринг текста
     // Шрифты → локаль → Unicode-подсистема → баннер OS.
     // ============================================================
-    unsafe { blog_os::vga_unicode::load_static_glyphs(); }
+    unsafe {
+        blog_os::vga_unicode::load_static_glyphs();
+    }
     blog_os::locale::draw_locale_badge();
     blog_os::serial_println!("[ЯДРО] Фаза 6: Шрифт + локаль готовы");
     blog_os::trace::record("font + locale ready");
@@ -224,7 +237,11 @@ fn print_startup_banner() {
         );
         blog_os::locale::print_localized_fmt(
             0x0E,
-            format_args!("القاموس: {} أوامر ({} بايت)", blog_os::unicode::dict_size(), blog_os::unicode::dict_bytes()),
+            format_args!(
+                "القاموس: {} أوامر ({} بايت)",
+                blog_os::unicode::dict_size(),
+                blog_os::unicode::dict_bytes()
+            ),
         );
     } else {
         blog_os::locale::print_localized_fmt(
@@ -238,7 +255,11 @@ fn print_startup_banner() {
         );
         blog_os::locale::print_localized_fmt(
             0x0E,
-            format_args!("Dictionary: {} intents ({} bytes)", blog_os::unicode::dict_size(), blog_os::unicode::dict_bytes()),
+            format_args!(
+                "Dictionary: {} intents ({} bytes)",
+                blog_os::unicode::dict_size(),
+                blog_os::unicode::dict_bytes()
+            ),
         );
     }
 }
@@ -265,18 +286,26 @@ fn panic(info: &PanicInfo) -> ! {
         blog_os::locale::render_panic_screen(blog_os::kernel_messages::KernelEvent::Panic);
         // Текст паники на строке 14 (truncate до 72 символов — ширина рамки)
         {
-            struct PanicBuf { data: [u8; 72], len: usize }
+            struct PanicBuf {
+                data: [u8; 72],
+                len: usize,
+            }
             impl core::fmt::Write for PanicBuf {
                 fn write_str(&mut self, s: &str) -> core::fmt::Result {
                     for &b in s.as_bytes() {
-                        if self.len >= self.data.len() { break; }
+                        if self.len >= self.data.len() {
+                            break;
+                        }
                         self.data[self.len] = b;
                         self.len += 1;
                     }
                     Ok(())
                 }
             }
-            let mut buf = PanicBuf { data: [0u8; 72], len: 0 };
+            let mut buf = PanicBuf {
+                data: [0u8; 72],
+                len: 0,
+            };
             let _ = core::fmt::write(&mut buf, format_args!("{}", info.message()));
             if buf.len > 0 {
                 if let Ok(msg) = core::str::from_utf8(&buf.data[..buf.len]) {
@@ -298,4 +327,3 @@ fn panic(info: &PanicInfo) -> ! {
 fn test_println() {
     blog_os::locale::print_localized_line("test_println output", 0x0F);
 }
-

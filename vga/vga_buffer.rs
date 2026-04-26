@@ -6,8 +6,22 @@ use spin::Mutex;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Color {
-    Black = 0, Blue = 1, Green = 2, Cyan = 3, Red = 4, Magenta = 5, Brown = 6, LightGray = 7,
-    DarkGray = 8, LightBlue = 9, LightGreen = 10, LightCyan = 11, LightRed = 12, Pink = 13, Yellow = 14, White = 15,
+    Black = 0,
+    Blue = 1,
+    Green = 2,
+    Cyan = 3,
+    Red = 4,
+    Magenta = 5,
+    Brown = 6,
+    LightGray = 7,
+    DarkGray = 8,
+    LightBlue = 9,
+    LightGreen = 10,
+    LightCyan = 11,
+    LightRed = 12,
+    Pink = 13,
+    Yellow = 14,
+    White = 15,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +87,10 @@ impl Writer {
                     unsafe {
                         core::ptr::write_volatile(
                             &mut self.buffer.chars[row][col],
-                            ScreenChar { ascii_character: b' ', color_code },
+                            ScreenChar {
+                                ascii_character: b' ',
+                                color_code,
+                            },
                         );
                     }
                 }
@@ -88,7 +105,10 @@ impl Writer {
                 unsafe {
                     core::ptr::write_volatile(
                         &mut self.buffer.chars[row][col],
-                        ScreenChar { ascii_character: byte, color_code },
+                        ScreenChar {
+                            ascii_character: byte,
+                            color_code,
+                        },
                     );
                 }
                 self.column_position += 1;
@@ -120,9 +140,7 @@ impl Writer {
         }
         for row in 1..buffer_height {
             for col in 0..buffer_width {
-                let character = unsafe {
-                    core::ptr::read_volatile(&self.buffer.chars[row][col])
-                };
+                let character = unsafe { core::ptr::read_volatile(&self.buffer.chars[row][col]) };
                 unsafe {
                     core::ptr::write_volatile(&mut self.buffer.chars[row - 1][col], character);
                 }
@@ -139,7 +157,9 @@ impl Writer {
         };
         let buffer_width = get_buffer_width();
         for col in 0..buffer_width {
-            unsafe { core::ptr::write_volatile(&mut self.buffer.chars[row][col], blank); }
+            unsafe {
+                core::ptr::write_volatile(&mut self.buffer.chars[row][col], blank);
+            }
         }
     }
 
@@ -298,7 +318,7 @@ pub fn restore_from_scrollback() {
         let sb = &raw const SCROLLBACK as *const u8;
         let total = SCROLL_TOTAL;
         let write_pos = SCROLL_WRITE;
-        
+
         // Восстанавливаем последние buffer_height строк из SCROLLBACK.
         // row=0 (top) → самый старый контент, row=height-1 (bottom) → самый свежий.
         for row in 0..buffer_height {

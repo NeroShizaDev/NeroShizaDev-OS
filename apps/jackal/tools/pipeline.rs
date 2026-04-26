@@ -16,11 +16,11 @@
 
 #![allow(dead_code)]
 
+use super::extractor::{ExtractOpts, Format, extract};
 use crate::apps::jackal::analyzer;
 use crate::apps::jackal::encoder::{self, EncodedBlock};
-use crate::apps::jackal::tools::validate::{self, ValidateResult};
 use crate::apps::jackal::tools::archive;
-use super::extractor::{extract, Format, ExtractOpts};
+use crate::apps::jackal::tools::validate::{self, ValidateResult};
 
 // Статический буфер для пайплайна (два слота: stage + output)
 const PIPE_BUF: usize = 256 * 1024;
@@ -28,14 +28,14 @@ const PIPE_BUF: usize = 256 * 1024;
 /// Результат пайплайна
 pub struct PipelineResult {
     /// Готовый .jkl с полным заголовком (JKL_HEADER_SIZE + payload)
-    pub jkl_buf:      [u8; PIPE_BUF],
-    pub jkl_len:      usize,
+    pub jkl_buf: [u8; PIPE_BUF],
+    pub jkl_len: usize,
     /// Метрики для отладки / shell вывода
     pub original_size: u64,
-    pub encoded_size:  u64,
-    pub ratio_milli:   u32,
-    pub algorithm:     u8,
-    pub kind_name:     &'static str,
+    pub encoded_size: u64,
+    pub ratio_milli: u32,
+    pub algorithm: u8,
+    pub kind_name: &'static str,
 }
 
 pub struct Pipeline;
@@ -47,7 +47,7 @@ impl Pipeline {
     /// Аналог: `python pipeline.py input.bin output.jkl`
     pub fn run(data: &[u8]) -> PipelineResult {
         let report = analyzer::analyze(data);
-        let block  = encoder::encode(data, &report);
+        let block = encoder::encode(data, &report);
 
         Self::build_result(data.len() as u64, &block)
     }
@@ -63,7 +63,9 @@ impl Pipeline {
     /// Возвращает длину записанного архива в `out`, 0 при ошибке.
     pub fn run_to_archive(data: &[u8], block_name: &[u8], out: &mut [u8]) -> usize {
         let result = Self::run(data);
-        if result.jkl_len == 0 { return 0; }
+        if result.jkl_len == 0 {
+            return 0;
+        }
 
         let mut arch = archive::Archive::new();
         if !arch.add_jkl_block(block_name, &result.jkl_buf[..result.jkl_len]) {
@@ -78,10 +80,7 @@ impl Pipeline {
     // ============================================================
     /// Аналог: `python pipeline.py doc.html output.jkl`
     /// Сначала очищает текст через extractor, потом кодирует.
-    pub fn extract_then_pack(
-        raw: &[u8],
-        mode: Format,
-    ) -> PipelineResult {
+    pub fn extract_then_pack(raw: &[u8], mode: Format) -> PipelineResult {
         // Буфер для чистого текста
         let mut clean: [u8; 16 * 1024] = [0u8; 16 * 1024];
         let opts = ExtractOpts::default();
@@ -89,7 +88,7 @@ impl Pipeline {
 
         let clean_slice = &clean[..clean_len];
         let report = analyzer::analyze(clean_slice);
-        let block  = encoder::encode(clean_slice, &report);
+        let block = encoder::encode(clean_slice, &report);
 
         Self::build_result(raw.len() as u64, &block)
     }
@@ -102,13 +101,13 @@ impl Pipeline {
     pub fn analyze_only(data: &[u8], dst: &mut [u8]) -> usize {
         let report = analyzer::analyze(data);
         let kind = match report.classification {
-            analyzer::FileKind::Text       => "TEXT",
+            analyzer::FileKind::Text => "TEXT",
             analyzer::FileKind::Executable => "EXECUTABLE",
             analyzer::FileKind::Compressed => "COMPRESSED",
-            analyzer::FileKind::Random     => "RANDOM",
+            analyzer::FileKind::Random => "RANDOM",
             analyzer::FileKind::Structured => "STRUCTURED",
             analyzer::FileKind::LossyMedia => "LOSSY_MEDIA",
-            analyzer::FileKind::Unknown    => "UNKNOWN",
+            analyzer::FileKind::Unknown => "UNKNOWN",
         };
         // Форматируем как строку (без alloc)
         let mut pos = 0usize;
@@ -131,13 +130,13 @@ impl Pipeline {
     // ============================================================
     fn build_result(original_size: u64, block: &EncodedBlock) -> PipelineResult {
         let mut result = PipelineResult {
-            jkl_buf:       [0u8; PIPE_BUF],
-            jkl_len:       0,
+            jkl_buf: [0u8; PIPE_BUF],
+            jkl_len: 0,
             original_size,
-            encoded_size:  block.encoded_size,
-            ratio_milli:   block.ratio_milli,
-            algorithm:     block.algorithm,
-            kind_name:     kind_str(block.kind),
+            encoded_size: block.encoded_size,
+            ratio_milli: block.ratio_milli,
+            algorithm: block.algorithm,
+            kind_name: kind_str(block.kind),
         };
 
         // Записываем заголовок
@@ -145,8 +144,7 @@ impl Pipeline {
         // Payload
         let pay_len = block.encoded_size as usize;
         if hdr_len + pay_len <= PIPE_BUF {
-            result.jkl_buf[hdr_len..hdr_len + pay_len]
-                .copy_from_slice(&block.buf[..pay_len]);
+            result.jkl_buf[hdr_len..hdr_len + pay_len].copy_from_slice(&block.buf[..pay_len]);
             result.jkl_len = hdr_len + pay_len;
         }
 
@@ -160,13 +158,13 @@ impl Pipeline {
 
 fn kind_str(k: analyzer::FileKind) -> &'static str {
     match k {
-        analyzer::FileKind::Text       => "TEXT",
+        analyzer::FileKind::Text => "TEXT",
         analyzer::FileKind::Executable => "EXECUTABLE",
         analyzer::FileKind::Compressed => "COMPRESSED",
-        analyzer::FileKind::Random     => "RANDOM",
+        analyzer::FileKind::Random => "RANDOM",
         analyzer::FileKind::Structured => "STRUCTURED",
         analyzer::FileKind::LossyMedia => "LOSSY_MEDIA",
-        analyzer::FileKind::Unknown    => "UNKNOWN",
+        analyzer::FileKind::Unknown => "UNKNOWN",
     }
 }
 
@@ -179,7 +177,9 @@ fn write_str(dst: &mut [u8], pos: usize, s: &str) -> usize {
 
 fn write_u64(dst: &mut [u8], pos: usize, v: u64) -> usize {
     // Пишем u64 как ASCII цифры
-    if pos >= dst.len() { return 0; }
+    if pos >= dst.len() {
+        return 0;
+    }
     let mut buf = [0u8; 20];
     let mut n = 0usize;
     let mut x = v;
@@ -199,4 +199,3 @@ fn write_u64(dst: &mut [u8], pos: usize, v: u64) -> usize {
     dst[pos..pos + copy].copy_from_slice(&buf[..copy]);
     copy
 }
-

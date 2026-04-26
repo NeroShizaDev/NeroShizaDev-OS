@@ -14,8 +14,8 @@ pub mod chaos;
 pub mod input;
 pub mod stubs;
 pub mod vga_graphics;
-pub mod watchdog;
 pub mod wad;
+pub mod watchdog;
 
 // ============================================================
 // Публичный API
@@ -75,27 +75,69 @@ pub fn run() {
         }
 
         loop {
-            if input::poll() { break; }
+            if input::poll() {
+                break;
+            }
 
             if input::take_mode_1() {
                 vga_graphics::fire_set_mode(vga_graphics::FireMode::Classic);
-                crate::serial_println!("[DOOM] Fire {}", vga_graphics::fire_mode_name(vga_graphics::fire_mode()));
+                crate::serial_println!(
+                    "[DOOM] Fire {}",
+                    vga_graphics::fire_mode_name(vga_graphics::fire_mode())
+                );
+                watchdog::log_profile("mode-1");
             }
             if input::take_mode_2() {
                 vga_graphics::fire_set_mode(vga_graphics::FireMode::Dual);
-                crate::serial_println!("[DOOM] Fire {}", vga_graphics::fire_mode_name(vga_graphics::fire_mode()));
+                crate::serial_println!(
+                    "[DOOM] Fire {}",
+                    vga_graphics::fire_mode_name(vga_graphics::fire_mode())
+                );
+                watchdog::log_profile("mode-2");
             }
             if input::take_mode_3() {
                 vga_graphics::fire_set_mode(vga_graphics::FireMode::Inferno);
-                crate::serial_println!("[DOOM] Fire {}", vga_graphics::fire_mode_name(vga_graphics::fire_mode()));
+                crate::serial_println!(
+                    "[DOOM] Fire {}",
+                    vga_graphics::fire_mode_name(vga_graphics::fire_mode())
+                );
+                watchdog::log_profile("mode-3");
             }
             if input::take_mode_4() {
                 vga_graphics::fire_set_mode(vga_graphics::FireMode::FpuNoise);
-                crate::serial_println!("[DOOM] Fire {}", vga_graphics::fire_mode_name(vga_graphics::fire_mode()));
+                crate::serial_println!(
+                    "[DOOM] Fire {}",
+                    vga_graphics::fire_mode_name(vga_graphics::fire_mode())
+                );
+                watchdog::log_profile("mode-4");
+            }
+            if input::take_mode_5() {
+                vga_graphics::fire_set_mode(vga_graphics::FireMode::WindLeft);
+                crate::serial_println!(
+                    "[DOOM] Fire {}",
+                    vga_graphics::fire_mode_name(vga_graphics::fire_mode())
+                );
+                watchdog::log_profile("mode-5");
+            }
+            if input::take_mode_6() {
+                vga_graphics::fire_set_mode(vga_graphics::FireMode::WindRight);
+                crate::serial_println!(
+                    "[DOOM] Fire {}",
+                    vga_graphics::fire_mode_name(vga_graphics::fire_mode())
+                );
+                watchdog::log_profile("mode-6");
             }
             if input::take_fpu_toggle() {
                 vga_graphics::fire_toggle_fpu();
-                crate::serial_println!("[DOOM] FPU {}", if vga_graphics::fire_fpu_enabled() { "ON" } else { "OFF" });
+                crate::serial_println!(
+                    "[DOOM] FPU {}",
+                    if vga_graphics::fire_fpu_enabled() {
+                        "ON"
+                    } else {
+                        "OFF"
+                    }
+                );
+                watchdog::log_profile("toggle-fpu");
             }
 
             if input::is_fire() {
@@ -163,6 +205,7 @@ pub fn reboot_from_doom() -> ! {
         let mut port = x86_64::instructions::port::Port::<u8>::new(0x64);
         port.write(0xFE);
     }
-    loop { x86_64::instructions::hlt(); }
+    loop {
+        x86_64::instructions::hlt();
+    }
 }
-

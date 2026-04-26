@@ -7,8 +7,8 @@
 
 #![allow(dead_code)]
 
-use crate::apps::jackal::encoder::{JKL_MAGIC, JKL_HEADER_SIZE};
 use super::archive::ARCH_MAGIC;
+use crate::apps::jackal::encoder::{JKL_HEADER_SIZE, JKL_MAGIC};
 
 // Большой scratch-архив для валидации JKLA в BSS (без мегабайт на стеке).
 static mut VALIDATE_SCRATCH: super::archive::Archive = super::archive::Archive::new();
@@ -74,8 +74,7 @@ fn validate_jkl(data: &[u8]) -> ValidateResult {
     }
 
     let enc_sz = u64::from_le_bytes([
-        data[14], data[15], data[16], data[17],
-        data[18], data[19], data[20], data[21],
+        data[14], data[15], data[16], data[17], data[18], data[19], data[20], data[21],
     ]) as usize;
 
     if JKL_HEADER_SIZE + enc_sz != data.len() {
@@ -87,10 +86,7 @@ fn validate_jkl(data: &[u8]) -> ValidateResult {
 
 fn validate_jkla(data: &[u8]) -> ValidateResult {
     let res = unsafe {
-        super::archive::unpack_into(
-            data,
-            &mut *core::ptr::addr_of_mut!(VALIDATE_SCRATCH),
-        )
+        super::archive::unpack_into(data, &mut *core::ptr::addr_of_mut!(VALIDATE_SCRATCH))
     };
     match res {
         Ok(()) => ValidateResult::JklaArchive,
@@ -99,4 +95,3 @@ fn validate_jkla(data: &[u8]) -> ValidateResult {
         Err(_) => ValidateResult::SizeMismatch,
     }
 }
-

@@ -12,9 +12,8 @@
 // В ядре нет файловой системы, поэтому все функции работают с &[u8] и &mut [u8].
 // ============================================================
 
-pub mod extractor;
 pub mod archive;
+pub mod extractor;
 pub mod pipeline;
-pub mod validate;
 pub mod replace;
-
+pub mod validate;

@@ -165,11 +165,11 @@ impl ByteDodgeGame {
         }
         let mut xx = x;
         for &b in &buf[i..] {
-            if xx >= VGA_WIDTH || y >= VGA_HEIGHT { break; }
+            if xx >= VGA_WIDTH || y >= VGA_HEIGHT {
+                break;
+            }
             write_vga_cell(xx, y, b, color);
             xx += 1;
         }
     }
 }
-
-

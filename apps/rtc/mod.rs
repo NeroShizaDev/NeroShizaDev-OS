@@ -130,14 +130,15 @@ pub fn display_status() {
             0x0E,
             format_args!(
                 "الوقت (مصر): {:02}:{:02}:{:02}  التاريخ: {:02}.{:02}.{}",
-                dt.hours, dt.minutes, dt.seconds,
-                dt.day, dt.month, dt.year
+                dt.hours, dt.minutes, dt.seconds, dt.day, dt.month, dt.year
             ),
         );
         return;
     }
 
-    crate::user_messages::print_rtc_line(dt.hours, dt.minutes, dt.seconds, dt.day, dt.month, dt.year);
+    crate::user_messages::print_rtc_line(
+        dt.hours, dt.minutes, dt.seconds, dt.day, dt.month, dt.year,
+    );
 }
 
 /// Читает IA32_THERM_STATUS (MSR 0x19C) и выводит температуру CPU.
@@ -186,14 +187,22 @@ fn thermal_status_supported() -> bool {
     eax6 & 1 != 0
 }
 
-pub fn display_thermal() {
+pub struct ThermalProbe {
+    pub throttle_logged: bool,
+    pub margin_c_to_tjmax: u32,
+    pub estimated_temp_c: u32,
+}
+
+/// Пытается прочитать IA32_THERM_STATUS и вернуть компактный снимок.
+/// None = MSR недоступен на текущем CPU.
+pub fn probe_thermal() -> Option<ThermalProbe> {
     if !thermal_status_supported() {
-        crate::locale::print_localized_line("[TEMP] IA32_THERM_STATUS unsupported", 0x0C);
-        return;
+        return None;
     }
 
     let eax: u32;
     let _edx: u32;
+
     // SAFETY: rdmsr — привилегированная инструкция, доступна на ring-0.
     // MSR 0x19C = IA32_THERM_STATUS, поддерживается на Intel Core/Xeon.
     unsafe {
@@ -205,14 +214,28 @@ pub fn display_thermal() {
             options(nomem, nostack),
         );
     }
-    let throttle = (eax >> 4) & 1 != 0; // бит 4: PROCHOT# log
-    let margin   = (eax >> 16) & 0x7F;  // биты 22:16: °C до TjMax
-    let tj_max   = 100u32;              // типовой TjMax Intel
-    let temp     = tj_max.saturating_sub(margin);
 
-    if throttle {
-        crate::user_messages::print_rtc_throttle(temp, margin);
+    let throttle_logged = (eax >> 4) & 1 != 0; // бит 4: PROCHOT# log
+    let margin = (eax >> 16) & 0x7F; // биты 22:16: °C до TjMax
+    let tj_max = 100u32; // типовой TjMax Intel
+    let temp = tj_max.saturating_sub(margin);
+
+    Some(ThermalProbe {
+        throttle_logged,
+        margin_c_to_tjmax: margin,
+        estimated_temp_c: temp,
+    })
+}
+
+pub fn display_thermal() {
+    let Some(probe) = probe_thermal() else {
+        crate::locale::print_localized_line("[TEMP] IA32_THERM_STATUS unsupported", 0x0C);
+        return;
+    };
+
+    if probe.throttle_logged {
+        crate::user_messages::print_rtc_throttle(probe.estimated_temp_c, probe.margin_c_to_tjmax);
     } else {
-        crate::user_messages::print_rtc_temp(temp, margin);
+        crate::user_messages::print_rtc_temp(probe.estimated_temp_c, probe.margin_c_to_tjmax);
     }
 }

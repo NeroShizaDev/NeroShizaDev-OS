@@ -12,6 +12,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   check:
     name: Check
@@ -26,18 +29,13 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6.0.2
       - name: Install Rust Toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          profile: minimal
-          toolchain: nightly
-      - name: Install `rust-src` Rustup Component
-        run: rustup component add rust-src
+          components: rust-src
       - name: Run `cargo check`
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
+        run: cargo check
 
   test:
     name: Test
@@ -51,21 +49,14 @@ jobs:
         ]
     runs-on: ${{ matrix.platform }}
     steps:
-      - name: Install Rust Toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-      - name: Install bootimage
-        run: cargo install bootimage --debug
       - name: Checkout Repository
-        uses: actions/checkout@v2
-      - name: Install Rustup Components
-        run: rustup component add rust-src llvm-tools-preview
-      - name: Run `cargo bootimage`
-        uses: actions-rs/cargo@v1
+        uses: actions/checkout@v6.0.2
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          command: bootimage
+          components: rust-src,llvm-tools-preview
+      - name: Run `cargo build`
+        run: cargo build
 
       # install QEMU
       - name: Install QEMU (Linux)
@@ -88,43 +79,30 @@ jobs:
         run: qemu-system-x86_64 --version
 
       - name: Run `cargo test`
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
+        run: cargo test --no-run
 
   check_formatting:
     name: Check Formatting
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6.0.2
       - name: Install Rust Toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          profile: minimal
-          toolchain: nightly
           components: rustfmt
-          override: true
       - name: Run `cargo fmt`
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo fmt --all -- --check
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6.0.2
       - name: Install Rust Toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          profile: minimal
-          toolchain: nightly
-          components: clippy, rust-src
-          override: true
+          components: clippy,rust-src
       - name: Run `cargo clippy`
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
+        run: cargo clippy

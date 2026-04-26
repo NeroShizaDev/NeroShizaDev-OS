@@ -51,15 +51,25 @@ impl ClickerGame {
         let mut i = 0;
         while i < level {
             if ng_plus {
-                if is_auto { val = (val * 18 + 9) / 10; }
-                else        { val = (val * 15 + 9) / 10; }
+                if is_auto {
+                    val = (val * 18 + 9) / 10;
+                } else {
+                    val = (val * 15 + 9) / 10;
+                }
             } else {
-                if is_auto { val = (val * 12 + 9) / 10; }
-                else        { val = (val * 115 + 99) / 100; }
+                if is_auto {
+                    val = (val * 12 + 9) / 10;
+                } else {
+                    val = (val * 115 + 99) / 100;
+                }
             }
             i += 1;
         }
-        if val > 0xFFFF_FFFF { 0xFFFF_FFFF } else { val as u32 }
+        if val > 0xFFFF_FFFF {
+            0xFFFF_FFFF
+        } else {
+            val as u32
+        }
     }
 
     pub unsafe fn init(&mut self) {
@@ -69,12 +79,16 @@ impl ClickerGame {
 
     pub unsafe fn update_costs(&mut self) {
         self.manual_upgrade_cost = Self::pow_ceil_int(
-            self.manual_upgrade_base_cost, self.manual_upgrade_level,
-            self.is_ng_plus_unlocked, false,
+            self.manual_upgrade_base_cost,
+            self.manual_upgrade_level,
+            self.is_ng_plus_unlocked,
+            false,
         );
         self.autoclicker_upgrade_cost = Self::pow_ceil_int(
-            self.autoclicker_upgrade_base_cost, self.autoclicker_upgrade_level,
-            self.is_ng_plus_unlocked, true,
+            self.autoclicker_upgrade_base_cost,
+            self.autoclicker_upgrade_level,
+            self.is_ng_plus_unlocked,
+            true,
         );
     }
 
@@ -83,7 +97,8 @@ impl ClickerGame {
         let delta = now.wrapping_sub(self.last_tsc);
         self.last_tsc = now;
         let steps = delta / 50_000_000u64;
-        self.total_clicks_x10 = self.total_clicks_x10
+        self.total_clicks_x10 = self
+            .total_clicks_x10
             .saturating_add((self.autoclicker_power_x10 as u64).saturating_mul(steps));
         let total_whole = (self.total_clicks_x10 / 10) as u32;
         if !self.interface_upgrade_unlocked && total_whole >= 100 {
@@ -149,24 +164,29 @@ impl ClickerGame {
         }
 
         print_line("", 0x0f);
-        print_line("1=Click  2=Upgrade Click  3=Upgrade Auto  U=UI  N=NAV  Q=Exit", 0x08);
+        print_line(
+            "1=Click  2=Upgrade Click  3=Upgrade Auto  U=UI  N=NAV  Q=Exit",
+            0x08,
+        );
 
         let _x87 = x87_fyl2x_demo(2.0, 8.0);
         sync_cursor();
     }
 
     pub unsafe fn manual_click(&mut self) {
-        self.total_clicks_x10 = self.total_clicks_x10
+        self.total_clicks_x10 = self
+            .total_clicks_x10
             .saturating_add((self.manual_click_power as u64) * 10);
     }
 
     pub unsafe fn upgrade_manual(&mut self) -> bool {
         let total_whole = (self.total_clicks_x10 / 10) as u32;
         if total_whole >= self.manual_upgrade_cost {
-            self.total_clicks_x10 = self.total_clicks_x10
+            self.total_clicks_x10 = self
+                .total_clicks_x10
                 .saturating_sub((self.manual_upgrade_cost as u64) * 10);
             self.manual_upgrade_level = self.manual_upgrade_level.saturating_add(1);
-            self.manual_click_power   = self.manual_click_power.saturating_add(1);
+            self.manual_click_power = self.manual_click_power.saturating_add(1);
             self.update_costs();
             return true;
         }
@@ -176,12 +196,14 @@ impl ClickerGame {
     pub unsafe fn upgrade_autoclicker(&mut self) -> bool {
         let total_whole = (self.total_clicks_x10 / 10) as u32;
         if total_whole >= self.autoclicker_upgrade_cost {
-            self.total_clicks_x10 = self.total_clicks_x10
+            self.total_clicks_x10 = self
+                .total_clicks_x10
                 .saturating_sub((self.autoclicker_upgrade_cost as u64) * 10);
             if self.autoclicker_upgrade_level == 0 {
                 self.autoclicker_power_x10 = self.autoclicker_power_x10.saturating_add(1);
             } else {
-                self.autoclicker_power_x10 = self.autoclicker_power_x10
+                self.autoclicker_power_x10 = self
+                    .autoclicker_power_x10
                     .saturating_add(self.autoclicker_upgrade_level);
             }
             self.autoclicker_upgrade_level = self.autoclicker_upgrade_level.saturating_add(1);
@@ -219,14 +241,21 @@ impl ClickerGame {
             let ch = read_key_blocking();
             match ch {
                 b'1' | b' ' | b'\n' => self.manual_click(),
-                b'2' => { let _ = self.upgrade_manual(); }
-                b'3' => { let _ = self.upgrade_autoclicker(); }
-                b'u' => { let _ = self.upgrade_interface(); }
-                b'n' => { let _ = self.upgrade_navigation(); }
+                b'2' => {
+                    let _ = self.upgrade_manual();
+                }
+                b'3' => {
+                    let _ = self.upgrade_autoclicker();
+                }
+                b'u' => {
+                    let _ = self.upgrade_interface();
+                }
+                b'n' => {
+                    let _ = self.upgrade_navigation();
+                }
                 b'q' => break,
                 _ => {}
             }
         }
     }
 }
-

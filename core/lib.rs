@@ -3,8 +3,10 @@
 #![feature(abi_x86_interrupt)]
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test_runner)]
-#![cfg_attr(all(test, target_os = "none"), reexport_test_harness_main = "test_main")]
-
+#![cfg_attr(
+    all(test, target_os = "none"),
+    reexport_test_harness_main = "test_main"
+)]
 // ================================================================
 // ГЛОБАЛЬНЫЕ АТРИБУТЫ ЛИНТОВ — только реальные ошибки, без шума
 // ================================================================
@@ -48,10 +50,6 @@ pub mod shell;
 #[path = "../apps/shell/logo.rs"]
 pub mod logo;
 
-/// crate::doom = doom/mod.rs (Doom-подсистема)
-#[path = "../apps/doom/mod.rs"]
-pub mod doom;
-
 /// crate::apps = apps/mod.rs (лаунчер программ: Doom/Games/Jackal)
 #[path = "../apps/mod.rs"]
 pub mod apps;
@@ -62,8 +60,8 @@ pub mod apps;
 // Цель: видеть вывод и логи до любой другой инициализации.
 // ================================================================
 pub mod serial;
-pub use vga::vga_hw;
 pub use vga::vga_buffer;
+pub use vga::vga_hw;
 
 // ================================================================
 // ФАЗА 2: Архитектура CPU
@@ -86,13 +84,13 @@ pub mod memory;
 // validator ПЕРВЫМ — probe перед любым чтением порта.
 // rtc → chronos → rng
 // ================================================================
-pub mod validator;
-pub mod trace;
 pub mod irq_guard;
 pub mod port_firewall;
-pub use apps::rtc;
+pub mod trace;
+pub mod validator;
 pub use apps::chronos;
 pub use apps::rng;
+pub use apps::rtc;
 
 // ================================================================
 // ФАЗА 5: Железо и Ввод
@@ -107,18 +105,19 @@ pub use apps::beeper;
 // unicode_* → vga_unicode → locale → kernel_messages
 // vga_unicode содержит все шрифты (кириллица, арабский, кеш).
 // ================================================================
+pub use fonts::locale;
 pub use fonts::unicode;
 pub use fonts::unicode_blocks;
 pub use fonts::unicode_categories;
 pub use fonts::unicode_scripts;
 pub use vga::vga_unicode;
-pub use fonts::locale;
 pub mod kernel_messages;
 pub mod user_messages;
 
 // ================================================================
 // ФАЗА 7: Пространство пользователя и Приложения
-// shell, logo, doom — объявлены выше с #[path].
+// shell, logo и apps — объявлены выше с #[path].
+// games::doom и games::tribe живут внутри apps/games/.
 // menger, voodoo_math — из moduls/.
 // ================================================================
 pub use apps::menger;
@@ -173,32 +172,34 @@ fn panic(info: &PanicInfo) -> ! {
     test_panic_handler(info)
 }
 
-#[cfg(all(test, target_os = "none"))]
-mod test_harness {
-    unsafe extern "Rust" {
-        pub fn test_main();
-    }
+pub trait Testable {
+    fn run(&self);
 }
-
-pub trait Testable { fn run(&self); }
-impl<T> Testable for T where T: Fn() {
+impl<T> Testable for T
+where
+    T: Fn(),
+{
     fn run(&self) {
         let name = core::any::type_name::<T>();
         serial_print!("{}...\t", name);
         // Имя теста на VGA (жёлтый, стандартный цвет)
-        for &b in name.as_bytes() { vga_buffer::WRITER.lock().write_byte(b); }
-        for &b in b"...\t" { vga_buffer::WRITER.lock().write_byte(b); }
+        for &b in name.as_bytes() {
+            vga_buffer::WRITER.lock().write_byte(b);
+        }
+        for &b in b"...\t" {
+            vga_buffer::WRITER.lock().write_byte(b);
+        }
         self();
         serial_println!("[ok]");
         // Зелёный [ok] на VGA
         {
             let mut w = vga_buffer::WRITER.lock();
             let saved = w.color_code;
-            w.color_code = vga_buffer::ColorCode::new(
-                vga_buffer::Color::LightGreen,
-                vga_buffer::Color::Black,
-            );
-            for &b in b"[ok]\n" { w.write_byte(b); }
+            w.color_code =
+                vga_buffer::ColorCode::new(vga_buffer::Color::LightGreen, vga_buffer::Color::Black);
+            for &b in b"[ok]\n" {
+                w.write_byte(b);
+            }
             w.color_code = saved;
         }
     }
@@ -216,6 +217,6 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
     init();
-    unsafe { test_harness::test_main(); }
+    test_main();
     hlt_loop();
 }

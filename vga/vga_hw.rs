@@ -73,9 +73,9 @@ pub unsafe fn write_reg(idx_addr: u16, dat_addr: u16, index: u8, data: u8) {
 pub unsafe fn enter_font_mode() {
     write_seq(0x02, 0x04); // Map Mask: plane 2 only
     write_seq(0x04, 0x06); // Memory Mode: sequential, no odd/even
-    write_gc(0x04, 0x02);  // Read Map Select: plane 2
-    write_gc(0x05, 0x00);  // Graphics Mode: write mode 0, read mode 0
-    write_gc(0x06, 0x00);  // Misc: A0000-BFFFF, no chain odd/even
+    write_gc(0x04, 0x02); // Read Map Select: plane 2
+    write_gc(0x05, 0x00); // Graphics Mode: write mode 0, read mode 0
+    write_gc(0x06, 0x00); // Misc: A0000-BFFFF, no chain odd/even
 }
 
 /// Восстанавливает нормальный текстовый режим VGA после enter_font_mode().
@@ -86,9 +86,9 @@ pub unsafe fn enter_font_mode() {
 pub unsafe fn exit_font_mode() {
     write_seq(0x02, 0x03); // Map Mask: planes 0+1
     write_seq(0x04, 0x02); // Memory Mode: odd/even
-    write_gc(0x04, 0x00);  // Read Map Select: plane 0
-    write_gc(0x05, 0x10);  // Graphics Mode: odd/even (text)
-    write_gc(0x06, 0x0E);  // Misc: B8000-BFFFF, text mode
+    write_gc(0x04, 0x00); // Read Map Select: plane 0
+    write_gc(0x05, 0x10); // Graphics Mode: odd/even (text)
+    write_gc(0x06, 0x0E); // Misc: B8000-BFFFF, text mode
 }
 
 // ============================================================
@@ -107,8 +107,8 @@ pub enum VgaTextMode {
 }
 
 /// Размеры VGA буфера в зависимости от текущего режима
-pub const VGA_COLUMNS: usize = 80;  // Стандартный размер 80 колонок
-pub const VGA_ROWS: usize = 25;     // Стандартный размер 25 строк
+pub const VGA_COLUMNS: usize = 80; // Стандартный размер 80 колонок
+pub const VGA_ROWS: usize = 25; // Стандартный размер 25 строк
 
 /// Глобальная переменная для хранения текущего режима VGA
 static mut CURRENT_VGA_MODE: VgaTextMode = VgaTextMode::Mode80x25;
@@ -181,7 +181,9 @@ pub fn detect_and_switch() -> VgaTextMode {
     // TODO: реализовать надёжную верификацию (например, пиксельный тест)
     //       перед повторным включением расширенного режима.
     let mode = VgaTextMode::Mode80x25;
-    unsafe { CURRENT_VGA_MODE = mode; }
+    unsafe {
+        CURRENT_VGA_MODE = mode;
+    }
     mode
 }
 
@@ -299,9 +301,8 @@ pub unsafe fn force_text_mode_3() {
     // Сначала сбрасываем flip-flop чтением 0x3DA
     let _ = Port::<u8>::new(0x3DA).read();
     static AC_REGS: [u8; 21] = [
-        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x14, 0x07,
-        0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
-        0x0C, // 0x10: Attribute Mode Control
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x14, 0x07, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E,
+        0x3F, 0x0C, // 0x10: Attribute Mode Control
         0x00, // 0x11: Overscan Color
         0x0F, // 0x12: Color Plane Enable
         0x08, // 0x13: Horizontal Pixel Panning

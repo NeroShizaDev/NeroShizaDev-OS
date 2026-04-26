@@ -22,10 +22,10 @@
 //   8. `uninstall <slot>` → очищает слот + реестр
 // ============================================================
 
-pub mod header;
-pub mod registry;
-pub mod slots;
-pub mod installer;
 pub mod crc32;
+pub mod header;
+pub mod installer;
+pub mod registry;
 pub mod runtime;
 pub mod serial_recv;
+pub mod slots;

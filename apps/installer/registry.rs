@@ -13,26 +13,33 @@ use super::slots::MAX_SLOTS;
 /// Одна запись = одно установленное приложение.
 #[derive(Clone, Copy)]
 pub struct InstalledApp {
-    pub occupied:       bool,
-    pub slot_index:     u8,
-    pub name:           [u8; 32],
-    pub author:         [u8; 32],
-    pub version:        [u8; 4],
-    pub icon_char:      u8,
-    pub category:       u8,
+    pub occupied: bool,
+    pub slot_index: u8,
+    pub name: [u8; 32],
+    pub author: [u8; 32],
+    pub version: [u8; 4],
+    pub icon_char: u8,
+    pub category: u8,
     pub installed_size: u32,
-    pub flags:          u32,
-    pub lump_count:     u16,
-    pub entry_point:    u32,
+    pub flags: u32,
+    pub lump_count: u16,
+    pub entry_point: u32,
 }
 
 impl InstalledApp {
     pub const fn empty() -> Self {
         Self {
-            occupied: false, slot_index: 0,
-            name: [0; 32], author: [0; 32], version: [0; 4],
-            icon_char: b'?', category: 0,
-            installed_size: 0, flags: 0, lump_count: 0, entry_point: 0,
+            occupied: false,
+            slot_index: 0,
+            name: [0; 32],
+            author: [0; 32],
+            version: [0; 4],
+            icon_char: b'?',
+            category: 0,
+            installed_size: 0,
+            flags: 0,
+            lump_count: 0,
+            entry_point: 0,
         }
     }
 
@@ -67,22 +74,26 @@ pub fn register(
     lump_count: u16,
     entry_point: u32,
 ) -> bool {
-    if slot >= MAX_SLOTS { return false; }
+    if slot >= MAX_SLOTS {
+        return false;
+    }
     unsafe {
-        if REGISTRY[slot].occupied { return false; }
+        if REGISTRY[slot].occupied {
+            return false;
+        }
 
         let r = &mut REGISTRY[slot];
-        r.occupied       = true;
-        r.slot_index     = slot as u8;
-        r.name           = manifest.app_name;
-        r.author         = manifest.author;
-        r.version        = manifest.version;
-        r.icon_char      = b'\xFE'; // ■ — по умолчанию
-        r.category       = 0;
+        r.occupied = true;
+        r.slot_index = slot as u8;
+        r.name = manifest.app_name;
+        r.author = manifest.author;
+        r.version = manifest.version;
+        r.icon_char = b'\xFE'; // ■ — по умолчанию
+        r.category = 0;
         r.installed_size = size;
-        r.flags          = flags;
-        r.lump_count     = lump_count;
-        r.entry_point    = entry_point;
+        r.flags = flags;
+        r.lump_count = lump_count;
+        r.entry_point = entry_point;
         true
     }
 }
@@ -90,9 +101,13 @@ pub fn register(
 /// Удаляет запись из реестра.
 /// Аналог: Windows удаляет ключ из Uninstall.
 pub fn unregister(slot: usize) -> bool {
-    if slot >= MAX_SLOTS { return false; }
+    if slot >= MAX_SLOTS {
+        return false;
+    }
     unsafe {
-        if !REGISTRY[slot].occupied { return false; }
+        if !REGISTRY[slot].occupied {
+            return false;
+        }
         REGISTRY[slot] = InstalledApp::empty();
         true
     }
@@ -113,9 +128,15 @@ pub fn installed_count() -> usize {
 
 /// Получить запись по индексу слота.
 pub fn get(slot: usize) -> Option<&'static InstalledApp> {
-    if slot >= MAX_SLOTS { return None; }
+    if slot >= MAX_SLOTS {
+        return None;
+    }
     unsafe {
-        if REGISTRY[slot].occupied { Some(&REGISTRY[slot]) } else { None }
+        if REGISTRY[slot].occupied {
+            Some(&REGISTRY[slot])
+        } else {
+            None
+        }
     }
 }
 
@@ -123,7 +144,9 @@ pub fn get(slot: usize) -> Option<&'static InstalledApp> {
 pub fn find_by_name(name: &[u8]) -> Option<usize> {
     unsafe {
         for i in 0..MAX_SLOTS {
-            if !REGISTRY[i].occupied { continue; }
+            if !REGISTRY[i].occupied {
+                continue;
+            }
             let n = &REGISTRY[i].name;
             let nlen = n.iter().position(|&b| b == 0).unwrap_or(32);
             if nlen == name.len() && &n[..nlen] == name {

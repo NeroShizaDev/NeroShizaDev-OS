@@ -1,4 +1,4 @@
-use bootloader_api::info::{MemoryRegions, MemoryRegionKind};
+use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use x86_64::{
     PhysAddr, VirtAddr,
     structures::paging::{
@@ -43,7 +43,9 @@ pub fn create_example_mapping(
 pub struct EmptyFrameAllocator;
 
 unsafe impl FrameAllocator<Size4KiB> for EmptyFrameAllocator {
-    fn allocate_frame(&mut self) -> Option<PhysFrame> { None }
+    fn allocate_frame(&mut self) -> Option<PhysFrame> {
+        None
+    }
 }
 
 /// FrameAllocator из карты памяти загрузчика (bootloader_api 0.11).
@@ -56,7 +58,10 @@ impl BootInfoFrameAllocator {
     /// SAFETY: карта памяти должна быть валидна; все Usable-регионы
     /// должны быть действительно свободны.
     pub unsafe fn init(memory_map: &'static MemoryRegions) -> Self {
-        BootInfoFrameAllocator { memory_map, next: 0 }
+        BootInfoFrameAllocator {
+            memory_map,
+            next: 0,
+        }
     }
 
     fn usable_frames(&self) -> impl Iterator<Item = PhysFrame> + '_ {
@@ -73,6 +78,17 @@ unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
         let frame = self.usable_frames().nth(self.next);
         self.next += 1;
+        match frame {
+            Some(frame) => crate::serial_println!(
+                "[MEM][FRAME] idx={} phys={:#x}",
+                self.next - 1,
+                frame.start_address().as_u64()
+            ),
+            None => crate::serial_println!(
+                "[MEM][FRAME][NONE] idx={} usable_exhausted=1",
+                self.next - 1
+            ),
+        }
         frame
     }
 }

@@ -25,13 +25,13 @@ pub fn probe_port(addr: u16) -> u8 {
     // MODULE_ABANDON: если порт запрещён — логируем и возвращаем 0xFF (floating)
     if let crate::port_firewall::PortAccess::Denied(name) = crate::port_firewall::check_port(addr) {
         crate::serial_println!(
-            "[VALIDATOR] MODULE_ABANDON: probe_port(0x{:04X}) denied — {}", addr, name
+            "[VALIDATOR] MODULE_ABANDON: probe_port(0x{:04X}) denied — {}",
+            addr,
+            name
         );
         return 0xFF;
     }
-    unsafe {
-        x86_64::instructions::port::Port::<u8>::new(addr).read()
-    }
+    unsafe { x86_64::instructions::port::Port::<u8>::new(addr).read() }
 }
 
 /// true = устройство отвечает (шина не floating).
@@ -46,27 +46,35 @@ pub fn port_alive(addr: u16) -> bool {
 
 /// PC Speaker / System Control Port B (0x61).
 /// Бит 1 = Speaker Data Enable, бит 0 = Timer 2 Gate.
-pub fn probe_speaker() -> bool { port_alive(0x61) }
+pub fn probe_speaker() -> bool {
+    port_alive(0x61)
+}
 
 /// PS/2 Status Register (0x64).
 /// 0xFF = нет PS/2 контроллера (USB-only машина).
-pub fn probe_ps2() -> bool { port_alive(0x64) }
+pub fn probe_ps2() -> bool {
+    port_alive(0x64)
+}
 
 /// COM1 Line Status Register (0x3F8 + 5 = 0x3FD).
 /// Idle = 0x60. 0xFF = нет UART / порт не существует.
 /// Некоторые UART могут возвращать 0x00 при отключенном питании.
-pub fn probe_serial() -> bool { port_alive(0x3FD) }
+pub fn probe_serial() -> bool {
+    port_alive(0x3FD)
+}
 
 /// VGA Input Status 1 (0x3DA, read-only, safe to probe).
 /// 0xFF = нет VGA контроллера.
-pub fn probe_vga() -> bool { port_alive(0x3DA) }
+pub fn probe_vga() -> bool {
+    port_alive(0x3DA)
+}
 
 /// Выводит результат опроса PS/2 контроллера.
 pub fn display_ps2_probe() {
     if probe_ps2() {
-        crate::locale::print_boot_status(
-            crate::user_messages::current(crate::user_messages::UiText::ValidatorPs2Ok),
-        );
+        crate::locale::print_boot_status(crate::user_messages::current(
+            crate::user_messages::UiText::ValidatorPs2Ok,
+        ));
     } else {
         crate::locale::print_localized_line(
             crate::user_messages::current(crate::user_messages::UiText::ValidatorPs2NoResp),
@@ -85,11 +93,126 @@ pub fn display_irq_guard_status() {
         0x0B,
         format_args!(
             "[IRQGUARD] enabled={} in_irq={} violations={}",
-            guard,
-            in_irq,
-            hits,
+            guard, in_irq, hits,
         ),
     );
+}
+
+/// Сводка ранних индикаторов возможного зависания до hard-fail.
+pub struct PreFreezeRiskReport {
+    pub cmos_time_valid: bool,
+    pub rtc_uip_stuck: bool,
+    pub thermal_supported: bool,
+    pub thermal_throttle_logged: bool,
+    pub thermal_margin_c_to_tjmax: Option<u32>,
+    pub irq_guard_violations: u64,
+    pub risk_score: u8,
+}
+
+impl PreFreezeRiskReport {
+    pub fn level(&self) -> &'static str {
+        if self.risk_score >= 5 {
+            "HIGH"
+        } else if self.risk_score >= 3 {
+            "MEDIUM"
+        } else {
+            "LOW"
+        }
+    }
+}
+
+/// Формирует сводный pre-freeze отчёт на базе доступных ранних индикаторов.
+/// Это не «диагноз поломки», а практичный риск-барометр для ранней реакции.
+pub fn probe_pre_freeze_risks() -> PreFreezeRiskReport {
+    let cmos = probe_cmos();
+    let irq_viol = crate::irq_guard::violation_count();
+    let thermal = crate::rtc::probe_thermal();
+
+    let mut score = 0u8;
+
+    if !cmos.rtc_ready {
+        score = score.saturating_add(2);
+    }
+
+    let (thermal_supported, thermal_throttle_logged, thermal_margin_c_to_tjmax) =
+        if let Some(sample) = thermal {
+            if sample.throttle_logged {
+                score = score.saturating_add(3);
+            }
+            if sample.margin_c_to_tjmax <= 5 {
+                score = score.saturating_add(2);
+            } else if sample.margin_c_to_tjmax <= 10 {
+                score = score.saturating_add(1);
+            }
+            (true, sample.throttle_logged, Some(sample.margin_c_to_tjmax))
+        } else {
+            (false, false, None)
+        };
+
+    if irq_viol >= 100 {
+        score = score.saturating_add(2);
+    } else if irq_viol > 0 {
+        score = score.saturating_add(1);
+    }
+
+    PreFreezeRiskReport {
+        cmos_time_valid: cmos.time_valid(),
+        rtc_uip_stuck: !cmos.rtc_ready,
+        thermal_supported,
+        thermal_throttle_logged,
+        thermal_margin_c_to_tjmax,
+        irq_guard_violations: irq_viol,
+        risk_score: score,
+    }
+}
+
+pub fn display_pre_freeze_risks(report: &PreFreezeRiskReport) {
+    crate::locale::print_localized_fmt(
+        0x0E,
+        format_args!(
+            "[HEALTH] pre-freeze risk={} score={} cmos_valid={} irq_hits={}",
+            report.level(),
+            report.risk_score,
+            report.cmos_time_valid,
+            report.irq_guard_violations,
+        ),
+    );
+
+    if report.rtc_uip_stuck {
+        handle_hw_error(
+            ErrorLevel::Recoverable,
+            "RTC UIP stuck: possible timing path stall precursor",
+        );
+    }
+
+    if report.thermal_throttle_logged {
+        handle_hw_error(
+            ErrorLevel::Recoverable,
+            "CPU thermal throttle was logged (PROCHOT): check cooling/VRM/airflow",
+        );
+    }
+
+    if let Some(margin) = report.thermal_margin_c_to_tjmax {
+        if margin <= 5 {
+            handle_hw_error(
+                ErrorLevel::Recoverable,
+                "CPU thermal headroom <=5C to TjMax: freeze risk is elevated",
+            );
+        }
+    }
+
+    if report.irq_guard_violations > 0 {
+        handle_hw_error(
+            ErrorLevel::Recoverable,
+            "IRQ guard violations detected: possible ISR overload/interrupt storm precursor",
+        );
+    }
+
+    if !report.thermal_supported {
+        crate::serial_println!(
+            "[VALIDATOR][HEALTH] thermal probe unsupported: partial risk visibility"
+        );
+    }
 }
 
 // ============================================================
@@ -188,13 +311,17 @@ pub fn probe_rtc_ready() -> bool {
             );
             return false;
         }
-        if sta & 0x80 == 0 { return true; }  // UIP = 0, готов
-        
+        if sta & 0x80 == 0 {
+            return true;
+        } // UIP = 0, готов
+
         // Добавляем задержку для ожидания сброса UIP-флага
         if sta & 0x80 != 0 {
-            for _ in 0..200 { core::hint::spin_loop(); }
+            for _ in 0..200 {
+                core::hint::spin_loop();
+            }
         }
-        
+
         tries += 1;
         if tries >= 65_000 {
             crate::serial_println!(
@@ -213,17 +340,27 @@ pub fn probe_cmos() -> CmosReport {
     let (chip_alive, status_a) = probe_chip();
     if !chip_alive {
         crate::serial_println!("[VALIDATOR][CMOS] chip dead (StatusA=0xFF)");
-        return CmosReport { chip_alive: false, battery_ok: false, rtc_ready: false, status_a };
+        return CmosReport {
+            chip_alive: false,
+            battery_ok: false,
+            rtc_ready: false,
+            status_a,
+        };
     }
     let battery_ok = probe_battery();
-    let rtc_ready  = probe_rtc_ready();
+    let rtc_ready = probe_rtc_ready();
     if !battery_ok {
         crate::serial_println!("[VALIDATOR][CMOS] battery low/dead (RegD bit7=0)");
     }
     if !rtc_ready {
         crate::serial_println!("[VALIDATOR][CMOS] RTC is not ready (UIP stuck or chip error)");
     }
-    CmosReport { chip_alive, battery_ok, rtc_ready, status_a }
+    CmosReport {
+        chip_alive,
+        battery_ok,
+        rtc_ready,
+        status_a,
+    }
 }
 
 /// Выводит результат опроса CMOS.
@@ -235,8 +372,16 @@ pub fn display_cmos_probe(report: &CmosReport) {
         );
         return;
     }
-    let bat_str = if report.battery_ok { "ОК (жива)" } else { "СДОХЛА! Время недостоверно" };
-    let rtc_str = if report.rtc_ready  { "ОК"        } else { "UIP завис — чип завис?" };
+    let bat_str = if report.battery_ok {
+        "ОК (жива)"
+    } else {
+        "СДОХЛА! Время недостоверно"
+    };
+    let rtc_str = if report.rtc_ready {
+        "ОК"
+    } else {
+        "UIP завис — чип завис?"
+    };
     crate::user_messages::print_validator_cmos(report.status_a, bat_str, rtc_str);
 }
 
@@ -274,7 +419,9 @@ pub fn handle_hw_error(level: ErrorLevel, msg: &str) {
             crate::serial_println!("[VALIDATOR][FATAL] hard reboot disabled; system will halt");
             crate::user_messages::print_validator_fatal(msg);
             x86_64::instructions::interrupts::disable();
-            loop { x86_64::instructions::hlt(); }
+            loop {
+                x86_64::instructions::hlt();
+            }
         }
     }
 }
