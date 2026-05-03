@@ -6,44 +6,44 @@ use crate::kernel_messages::Locale;
 /// После выбора: устанавливает локаль, обновляет badge, Pop.
 use x86_64::instructions::hlt;
 
-// ── Direct VGA (same helpers as launcher) ─────────────────────────────────────
-const VGA: *mut u8 = 0xb8000 as *mut u8;
-
-unsafe fn put(row: usize, col: usize, ch: u8, color: u8) {
-    if row >= 25 || col >= 80 {
-        return;
-    }
-    let off = (row * 80 + col) * 2;
-    core::ptr::write_volatile(VGA.add(off), ch);
-    core::ptr::write_volatile(VGA.add(off + 1), color);
+// ── FB-buffer helpers (framebuffer only) ─────────────────────────────────────────────────
+fn put(row: usize, col: usize, ch: u8, color: u8) {
+    crate::fb_buffer::write_char_at(col, row, ch, color);
 }
 
-unsafe fn fill_seg(row: usize, col: usize, len: usize, color: u8) {
+fn fill_seg(row: usize, col: usize, len: usize, color: u8) {
     for c in 0..len {
         put(row, col + c, b' ', color);
     }
 }
 
-unsafe fn puts(row: usize, col: usize, s: &[u8], color: u8) {
+fn puts(row: usize, col: usize, s: &[u8], color: u8) {
     for (i, &b) in s.iter().enumerate() {
         put(row, col + i, b, color);
     }
 }
 
-unsafe fn puts_utf8(row: usize, col: usize, s: &str, color: u8) -> usize {
+fn puts_utf8(row: usize, col: usize, s: &str, color: u8) -> usize {
+    let cols = crate::fb_buffer::get_cols();
+    let rows = crate::fb_buffer::get_rows();
     let mut x = col;
     for ch in s.chars() {
-        if row >= 25 || x >= 80 {
+        if row >= rows || x >= cols {
             break;
         }
-        x += crate::vga_unicode::print_char(ch as u32, x, row, color).max(1);
+        crate::fb_buffer::write_codepoint_at(x, row, ch as u32, color);
+        x += 1;
     }
     x.saturating_sub(col)
 }
 
-unsafe fn fill_screen(color: u8) {
-    for r in 0..25usize {
-        fill_seg(r, 0, 80, color);
+fn fill_screen(color: u8) {
+    let rows = crate::fb_buffer::get_rows();
+    let cols = crate::fb_buffer::get_cols();
+    for r in 0..rows {
+        for c in 0..cols {
+            crate::fb_buffer::write_char_at(c, r, b' ', color);
+        }
     }
 }
 
@@ -129,15 +129,11 @@ fn hint_text() -> &'static str {
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 pub fn on_start() {
-    unsafe {
-        render(0);
-    }
+    render(0);
 }
 
 pub fn on_resume() {
-    unsafe {
-        render(0);
-    }
+    render(0);
 }
 
 pub fn on_pause() {}
@@ -155,47 +151,43 @@ pub fn update(_depth: usize) -> ActivityIntent {
         }
     }
 
-    unsafe {
-        render(sel);
-    }
+    render(sel);
 
     loop {
-        unsafe {
-            if crate::ps2::has_scancode() {
-                let sc = crate::ps2::read_scancode();
-                if sc & 0x80 != 0 {
-                    continue;
-                } // key-up
+        if unsafe { crate::ps2::has_scancode() } {
+            let sc = unsafe { crate::ps2::read_scancode() };
+            if sc & 0x80 != 0 {
+                continue;
+            } // key-up
 
-                match sc {
-                    0x48 => {
-                        // ↑
-                        sel = if sel == 0 { ITEMS.len() - 1 } else { sel - 1 };
-                        render(sel);
-                    }
-                    0x50 => {
-                        // ↓
-                        sel = (sel + 1) % ITEMS.len();
-                        render(sel);
-                    }
-                    0x1C => {
-                        // Enter — apply & back
-                        crate::locale::set_locale(ITEMS[sel].locale);
-                        crate::locale::draw_locale_badge();
-                        return ActivityIntent::Pop;
-                    }
-                    0x01 => return ActivityIntent::Pop, // Esc
-                    _ => {}
+            match sc {
+                0x48 => {
+                    // ↑
+                    sel = if sel == 0 { ITEMS.len() - 1 } else { sel - 1 };
+                    render(sel);
                 }
+                0x50 => {
+                    // ↓
+                    sel = (sel + 1) % ITEMS.len();
+                    render(sel);
+                }
+                0x1C => {
+                    // Enter — apply & back
+                    crate::locale::set_locale(ITEMS[sel].locale);
+                    crate::locale::draw_locale_badge();
+                    return ActivityIntent::Pop;
+                }
+                0x01 => return ActivityIntent::Pop, // Esc
+                _ => {}
             }
-        } // unsafe
+        }
         hlt();
     }
 }
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
-unsafe fn render(sel: usize) {
+fn render(sel: usize) {
     fill_screen(BG);
 
     // Breadcrumb

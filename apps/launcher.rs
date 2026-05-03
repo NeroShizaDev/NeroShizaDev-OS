@@ -9,37 +9,27 @@ use crate::kernel_messages::Locale;
 ///   on_resume()      — вернулись к нам, перерисовываем экран
 use x86_64::instructions::hlt;
 
-// ── Direct VGA helpers (no WRITER lock — launcher owns the screen) ───────────
-const VGA: *mut u8 = 0xb8000 as *mut u8;
-
-unsafe fn put(row: usize, col: usize, ch: u8, color: u8) {
-    if row >= 25 || col >= 80 {
-        return;
-    }
-    let off = (row * 80 + col) * 2;
-    core::ptr::write_volatile(VGA.add(off), ch);
-    core::ptr::write_volatile(VGA.add(off + 1), color);
+// ── FB-buffer helpers (framebuffer only — VGA text mode не используется) ───────
+fn put(row: usize, col: usize, ch: u8, color: u8) {
+    crate::fb_buffer::write_char_at(col, row, ch, color);
 }
 
-unsafe fn fill_seg(row: usize, col: usize, len: usize, color: u8) {
+fn fill_seg(row: usize, col: usize, len: usize, color: u8) {
     for c in 0..len {
         put(row, col + c, b' ', color);
     }
 }
 
-unsafe fn puts(row: usize, col: usize, s: &[u8], color: u8) {
-    for (i, &b) in s.iter().enumerate() {
-        put(row, col + i, b, color);
-    }
-}
-
-unsafe fn puts_utf8(row: usize, col: usize, s: &str, color: u8) -> usize {
+fn puts_utf8(row: usize, col: usize, s: &str, color: u8) -> usize {
+    let cols = crate::fb_buffer::get_cols();
+    let rows = crate::fb_buffer::get_rows();
     let mut x = col;
     for ch in s.chars() {
-        if row >= 25 || x >= 80 {
+        if row >= rows || x >= cols {
             break;
         }
-        x += crate::vga_unicode::print_char(ch as u32, x, row, color).max(1);
+        crate::fb_buffer::write_codepoint_at(x, row, ch as u32, color);
+        x += 1;
     }
     x.saturating_sub(col)
 }
@@ -48,9 +38,13 @@ fn utf8_cell_len(s: &str) -> usize {
     s.chars().count()
 }
 
-unsafe fn fill_screen(color: u8) {
-    for r in 0..25usize {
-        fill_seg(r, 0, 80, color);
+fn fill_screen(color: u8) {
+    let rows = crate::fb_buffer::get_rows();
+    let cols = crate::fb_buffer::get_cols();
+    for r in 0..rows {
+        for c in 0..cols {
+            crate::fb_buffer::write_char_at(c, r, b' ', color);
+        }
     }
 }
 
@@ -82,9 +76,9 @@ const TAG: u8 = 0x1A; // LtGreen on Blue
 
 struct Entry {
     app: Option<AppKind>,
-    name: &'static [u8],
-    desc: &'static [u8],
-    tag: &'static [u8],
+    name: &'static str,
+    desc: &'static str,
+    tag: &'static str,
     is_header: bool, // true — секция-разделитель, не выбирается
 }
 
@@ -116,23 +110,23 @@ fn controls_hint_text() -> &'static str {
     }
 }
 
-fn header_text(name: &[u8]) -> &'static str {
+fn header_text(name: &str) -> &'static str {
     match (current_locale(), name) {
-        (Locale::RuRu, b" GAMES") => " ИГРЫ",
-        (Locale::RuRu, b" TOOLS") => " ИНСТРУМЕНТЫ",
-        (Locale::RuRu, b" SCIENCE") => " НАУКА",
-        (Locale::RuRu, b" SYSTEM") => " СИСТЕМА",
-        (Locale::RuRu, b" INSTALLED") => " УСТАНОВЛЕНО",
-        (Locale::EnUs, b" GAMES") => " GAMES",
-        (Locale::EnUs, b" TOOLS") => " TOOLS",
-        (Locale::EnUs, b" SCIENCE") => " SCIENCE",
-        (Locale::EnUs, b" SYSTEM") => " SYSTEM",
-        (Locale::EnUs, b" INSTALLED") => " INSTALLED",
-        (Locale::ArEg, b" GAMES") => " الألعاب",
-        (Locale::ArEg, b" TOOLS") => " الأدوات",
-        (Locale::ArEg, b" SCIENCE") => " العلوم",
-        (Locale::ArEg, b" SYSTEM") => " النظام",
-        (Locale::ArEg, b" INSTALLED") => " المثبت",
+        (Locale::RuRu, " GAMES") => " ИГРЫ",
+        (Locale::RuRu, " TOOLS") => " ИНСТРУМЕНТЫ",
+        (Locale::RuRu, " SCIENCE") => " НАУКА",
+        (Locale::RuRu, " SYSTEM") => " СИСТЕМА",
+        (Locale::RuRu, " INSTALLED") => " УСТАНОВЛЕНО",
+        (Locale::EnUs, " GAMES") => " GAMES",
+        (Locale::EnUs, " TOOLS") => " TOOLS",
+        (Locale::EnUs, " SCIENCE") => " SCIENCE",
+        (Locale::EnUs, " SYSTEM") => " SYSTEM",
+        (Locale::EnUs, " INSTALLED") => " INSTALLED",
+        (Locale::ArEg, " GAMES") => " الألعاب",
+        (Locale::ArEg, " TOOLS") => " الأدوات",
+        (Locale::ArEg, " SCIENCE") => " العلوم",
+        (Locale::ArEg, " SYSTEM") => " النظام",
+        (Locale::ArEg, " INSTALLED") => " المثبت",
         _ => "",
     }
 }
@@ -179,11 +173,7 @@ fn entry_text(e: &Entry) -> (&'static str, &'static str, &'static str) {
         (Locale::ArEg, Some(AppKind::Beeper)) => ("Beeper", "PC Speaker وسلم سداسي", "[صوت]"),
         (Locale::ArEg, Some(AppKind::Locale)) => ("اللغة", "بدل واجهة RU / EN / AR", "[لغة]"),
         (Locale::ArEg, None) if !e.is_header => ("Shell", "رجوع إلى طرفية IBIP", "[خروج]"),
-        _ => (
-            core::str::from_utf8(e.name).unwrap_or(""),
-            core::str::from_utf8(e.desc).unwrap_or(""),
-            core::str::from_utf8(e.tag).unwrap_or(""),
-        ),
+        _ => (e.name, e.desc, e.tag),
     }
 }
 
@@ -248,133 +238,141 @@ const ENTRIES: &[Entry] = &[
     Entry {
         is_header: true,
         app: None,
-        name: b" GAMES",
-        desc: b"",
-        tag: b"",
+        name: " GAMES",
+        desc: "",
+        tag: "",
     },
     Entry {
         is_header: false,
         app: Some(AppKind::Games),
-        name: b"Games",
-        desc: b"Doom, Tribe, Dodge, Cards & more",
-        tag: b"[7in1]  ",
+        name: "Games",
+        desc: "Doom, Tribe, Dodge, Cards & more",
+        tag: "[7in1]  ",
     },
     // ─── TOOLS ───────────────────────────────────────────────────────────────
     Entry {
         is_header: true,
         app: None,
-        name: b" TOOLS",
-        desc: b"",
-        tag: b"",
+        name: " TOOLS",
+        desc: "",
+        tag: "",
     },
     Entry {
         is_header: false,
         app: Some(AppKind::Jackal),
-        name: b"Jackal",
-        desc: b"Jackal analyzer & archiver",
-        tag: b"[Tool]  ",
+        name: "Jackal",
+        desc: "Jackal analyzer & archiver",
+        tag: "[Tool]  ",
     },
     // ─── SCIENCE ─────────────────────────────────────────────────────────────
     Entry {
         is_header: true,
         app: None,
-        name: b" SCIENCE",
-        desc: b"",
-        tag: b"",
+        name: " SCIENCE",
+        desc: "",
+        tag: "",
     },
     Entry {
         is_header: false,
         app: Some(AppKind::Menger),
-        name: b"Menger",
-        desc: b"3D Menger Sponge, ray marching",
-        tag: b"[3D]    ",
+        name: "Menger",
+        desc: "3D Menger Sponge, ray marching",
+        tag: "[3D]    ",
     },
     Entry {
         is_header: false,
         app: Some(AppKind::Calculator),
-        name: b"Calculator",
-        desc: b"Engineering IEEE 754 / ISO 60559",
-        tag: b"[Calc]  ",
+        name: "Calculator",
+        desc: "Engineering IEEE 754 / ISO 60559",
+        tag: "[Calc]  ",
     },
     Entry {
         is_header: false,
         app: Some(AppKind::Fpu),
-        name: b"FPU",
-        desc: b"x87 log2, sqrt, entropy",
-        tag: b"[Math]  ",
+        name: "FPU",
+        desc: "x87 log2, sqrt, entropy",
+        tag: "[Math]  ",
     },
     Entry {
         is_header: false,
         app: Some(AppKind::Voodoo),
-        name: b"Voodoo",
-        desc: b"Bayesian oracle + automata",
-        tag: b"[AI]    ",
+        name: "Voodoo",
+        desc: "Bayesian oracle + automata",
+        tag: "[AI]    ",
     },
     Entry {
         is_header: false,
         app: Some(AppKind::Rng),
-        name: b"RNG",
-        desc: b"RDRAND random + d6 dice",
-        tag: b"[RNG]   ",
+        name: "RNG",
+        desc: "RDRAND random + d6 dice",
+        tag: "[RNG]   ",
     },
     // ─── SYSTEM ──────────────────────────────────────────────────────────────
     Entry {
         is_header: true,
         app: None,
-        name: b" SYSTEM",
-        desc: b"",
-        tag: b"",
+        name: " SYSTEM",
+        desc: "",
+        tag: "",
     },
     Entry {
         is_header: false,
         app: Some(AppKind::Chronos),
-        name: b"Chronos",
-        desc: b"HEX clock + Psychotown time",
-        tag: b"[Clock] ",
+        name: "Chronos",
+        desc: "HEX clock + Psychotown time",
+        tag: "[Clock] ",
     },
     Entry {
         is_header: false,
         app: Some(AppKind::Rtc),
-        name: b"RTC",
-        desc: b"Hardware RTC, CMOS, battery",
-        tag: b"[HW]    ",
+        name: "RTC",
+        desc: "Hardware RTC, CMOS, battery",
+        tag: "[HW]    ",
     },
     Entry {
         is_header: false,
         app: Some(AppKind::Beeper),
-        name: b"Beeper",
-        desc: b"PC Speaker hexatonic scale",
-        tag: b"[Sound] ",
+        name: "Beeper",
+        desc: "PC Speaker hexatonic scale",
+        tag: "[Sound] ",
     },
     Entry {
         is_header: false,
         app: Some(AppKind::Locale),
-        name: b"Language",
-        desc: b"Switch RU / EN / AR interface",
-        tag: b"[Lang]  ",
+        name: "Language",
+        desc: "Switch RU / EN / AR interface",
+        tag: "[Lang]  ",
     },
     // ─────────────────────────────────────────────────────────────────────────
     Entry {
         is_header: true,
         app: None,
-        name: b"",
-        desc: b"",
-        tag: b"",
+        name: "",
+        desc: "",
+        tag: "",
     },
     Entry {
         is_header: false,
         app: None,
-        name: b"Shell",
-        desc: b"Back to IBIP terminal",
-        tag: b"[Exit]  ",
+        name: "Shell",
+        desc: "Back to IBIP terminal",
+        tag: "[Exit]  ",
     },
 ];
 
 // ── Layout constants ──────────────────────────────────────────────────────────
-const BOX_COL: usize = 0; // полный экран: бокс от col 0
 const BOX_W: usize = 78; // inner width: cols 1..78, border at 0 и 79
-const BOX_ROW: usize = 1; // breadcrumb на row 0, бокс с row 1
 const VISIBLE_ITEMS: usize = 19; // rows 4..22 — без gap-строки, bot=23, hint=24
+
+fn layout_origin() -> (usize, usize) {
+    let cols = crate::fb_buffer::get_cols();
+    let rows = crate::fb_buffer::get_rows();
+    let full_w = BOX_W + 2;
+    let full_h = VISIBLE_ITEMS + 6;
+    let col = cols.saturating_sub(full_w) / 2;
+    let row = rows.saturating_sub(full_h) / 2;
+    (col, row)
+}
 
 // ── Merged item list — static + dynamic NHS ───────────────────────────────────
 
@@ -640,47 +638,48 @@ pub fn update(depth: usize) -> ActivityIntent {
 
 unsafe fn render(items: &[LItem; MAX_ITEMS], n: usize, sel: usize, scroll: usize, depth: usize) {
     fill_screen(BG);
+    let (box_col, box_row) = layout_origin();
 
     // Breadcrumb: на row 0
-    puts_utf8(0, 2, "[ NeroShizaDev-OS ]", TITLE);
-    puts_utf8(0, 21, apps_breadcrumb_text(), BORDER);
+    puts_utf8(box_row, box_col + 2, "[ NeroShizaDev-OS ]", TITLE);
+    puts_utf8(box_row, box_col + 21, apps_breadcrumb_text(), BORDER);
     if depth > 1 {
         let d = (depth as u8).min(8) as usize;
         for i in 0..d {
-            put(0, 68 + i, 0xF9, HINT);
+            put(box_row, box_col + 68 + i, 0xF9, HINT);
         }
     }
 
     // Top border
-    put(BOX_ROW, BOX_COL, TL, BORDER);
+    put(box_row + 1, box_col, TL, BORDER);
     for c in 1..=BOX_W {
-        put(BOX_ROW, BOX_COL + c, HZ, BORDER);
+        put(box_row + 1, box_col + c, HZ, BORDER);
     }
-    put(BOX_ROW, BOX_COL + BOX_W + 1, TR, BORDER);
+    put(box_row + 1, box_col + BOX_W + 1, TR, BORDER);
 
     // Header row
-    let h = BOX_ROW + 1;
-    put(h, BOX_COL, VT, BORDER);
-    fill_seg(h, BOX_COL + 1, BOX_W, TITLE);
-    puts_utf8(h, BOX_COL + 10, launchpad_title_text(), TITLE);
-    put(h, BOX_COL + BOX_W + 1, VT, BORDER);
+    let h = box_row + 2;
+    put(h, box_col, VT, BORDER);
+    fill_seg(h, box_col + 1, BOX_W, TITLE);
+    puts_utf8(h, box_col + 10, launchpad_title_text(), TITLE);
+    put(h, box_col + BOX_W + 1, VT, BORDER);
 
     // Divider
-    let div = BOX_ROW + 2;
-    put(div, BOX_COL, ML, BORDER);
+    let div = box_row + 3;
+    put(div, box_col, ML, BORDER);
     for c in 1..=BOX_W {
-        put(div, BOX_COL + c, HZ, BORDER);
+        put(div, box_col + c, HZ, BORDER);
     }
-    put(div, BOX_COL + BOX_W + 1, MR, BORDER);
+    put(div, box_col + BOX_W + 1, MR, BORDER);
 
     // Menu items (с прокруткой)
     for vis in 0..VISIBLE_ITEMS {
         let i = scroll + vis;
-        let row = BOX_ROW + 3 + vis;
+        let row = box_row + 4 + vis;
 
         if i >= n {
             // Строки за пределами списка — пустые
-            vt_blank(row);
+            vt_blank(row, box_col);
             continue;
         }
 
@@ -689,122 +688,122 @@ unsafe fn render(items: &[LItem; MAX_ITEMS], n: usize, sel: usize, scroll: usize
             IKind::Stat => {
                 let e = &ENTRIES[item.index];
                 if e.is_header {
-                    render_section_header(row, e.name);
+                    render_section_header(row, box_col, e.name);
                 } else {
-                    render_static_entry(row, e, i == sel);
+                    render_static_entry(row, box_col, e, i == sel);
                 }
             }
-            IKind::NhsH => render_section_header(row, nhs_header_text().as_bytes()),
-            IKind::NhsA => render_nhs_entry(row, item.index, i == sel),
+            IKind::NhsH => render_section_header(row, box_col, nhs_header_text()),
+            IKind::NhsA => render_nhs_entry(row, box_col, item.index, i == sel),
         }
     }
 
     // Индикаторы прокрутки ▲ ▼
     if scroll > 0 {
-        put(BOX_ROW + 3, BOX_COL + BOX_W, 0x1E, BORDER); // ▲
+        put(box_row + 4, box_col + BOX_W, 0x1E, BORDER); // ▲
     }
     if scroll + VISIBLE_ITEMS < n {
         put(
-            BOX_ROW + 3 + VISIBLE_ITEMS - 1,
-            BOX_COL + BOX_W,
+            box_row + 4 + VISIBLE_ITEMS - 1,
+            box_col + BOX_W,
             0x1F,
             BORDER,
         ); // ▼
     }
 
     // Bottom border (row 23, вплотную к items — gap убран для fullscreen)
-    let bot = BOX_ROW + 3 + VISIBLE_ITEMS;
-    put(bot, BOX_COL, BL, BORDER);
+    let bot = box_row + 4 + VISIBLE_ITEMS;
+    put(bot, box_col, BL, BORDER);
     for c in 1..=BOX_W {
-        put(bot, BOX_COL + c, HZ, BORDER);
+        put(bot, box_col + c, HZ, BORDER);
     }
-    put(bot, BOX_COL + BOX_W + 1, BR, BORDER);
+    put(bot, box_col + BOX_W + 1, BR, BORDER);
 
     // Controls hint (row 24 — последняя строка экрана)
-    puts_utf8(bot + 1, 13, controls_hint_text(), HINT);
+    puts_utf8(bot + 1, box_col + 13, controls_hint_text(), HINT);
 
     // Locale badge (row 0, col 72..79) — перерисовываем после fill_screen
     crate::locale::draw_locale_badge();
 }
 
-unsafe fn render_section_header(row: usize, name: &[u8]) {
-    put(row, BOX_COL, SL, BORDER);
+unsafe fn render_section_header(row: usize, box_col: usize, name: &str) {
+    put(row, box_col, SL, BORDER);
     for c in 1..=BOX_W {
-        put(row, BOX_COL + c, b'-', HINT);
+        put(row, box_col + c, b'-', HINT);
     }
     if !name.is_empty() {
-        put(row, BOX_COL + 2, b' ', HINT);
+        put(row, box_col + 2, b' ', HINT);
         let text = header_text(name);
-        let width = puts_utf8(row, BOX_COL + 3, text, TAG);
-        let end = BOX_COL + 3 + width;
-        if end < BOX_COL + BOX_W {
+        let width = puts_utf8(row, box_col + 3, text, TAG);
+        let end = box_col + 3 + width;
+        if end < box_col + BOX_W {
             put(row, end, b' ', HINT);
         }
     }
-    put(row, BOX_COL + BOX_W + 1, SR, BORDER);
+    put(row, box_col + BOX_W + 1, SR, BORDER);
 }
 
-unsafe fn render_static_entry(row: usize, e: &Entry, is_sel: bool) {
+unsafe fn render_static_entry(row: usize, box_col: usize, e: &Entry, is_sel: bool) {
     let fg = if is_sel { HILIT } else { NORMAL };
     let row_bg = if is_sel { HILIT } else { BG };
 
-    put(row, BOX_COL, VT, BORDER);
-    fill_seg(row, BOX_COL + 1, BOX_W, row_bg);
-    put(row, BOX_COL + 2, if is_sel { ARW } else { b' ' }, fg);
-    put(row, BOX_COL + 3, b' ', fg);
+    put(row, box_col, VT, BORDER);
+    fill_seg(row, box_col + 1, BOX_W, row_bg);
+    put(row, box_col + 2, if is_sel { ARW } else { b' ' }, fg);
+    put(row, box_col + 3, b' ', fg);
 
-    let nc = BOX_COL + 4;
+    let nc = box_col + 4;
     let (name, desc, tag) = entry_text(e);
     let name_w = puts_utf8(row, nc, name, fg);
     for p in name_w..9 {
         put(row, nc + p, b' ', fg);
     }
-    put(row, BOX_COL + 13, SEP, if is_sel { HILIT } else { BORDER });
-    puts_utf8(row, BOX_COL + 15, desc, fg);
-    let tc = BOX_COL + BOX_W + 1 - utf8_cell_len(tag) - 1;
+    put(row, box_col + 13, SEP, if is_sel { HILIT } else { BORDER });
+    puts_utf8(row, box_col + 15, desc, fg);
+    let tc = box_col + BOX_W + 1 - utf8_cell_len(tag) - 1;
     puts_utf8(row, tc, tag, if is_sel { HILIT } else { TAG });
-    put(row, BOX_COL + BOX_W + 1, VT, BORDER);
+    put(row, box_col + BOX_W + 1, VT, BORDER);
 }
 
-unsafe fn render_nhs_entry(row: usize, slot: usize, is_sel: bool) {
+unsafe fn render_nhs_entry(row: usize, box_col: usize, slot: usize, is_sel: bool) {
     let fg = if is_sel { HILIT } else { NORMAL };
     let row_bg = if is_sel { HILIT } else { BG };
 
-    put(row, BOX_COL, VT, BORDER);
-    fill_seg(row, BOX_COL + 1, BOX_W, row_bg);
-    put(row, BOX_COL + 2, if is_sel { ARW } else { b' ' }, fg);
-    put(row, BOX_COL + 3, b' ', fg);
+    put(row, box_col, VT, BORDER);
+    fill_seg(row, box_col + 1, BOX_W, row_bg);
+    put(row, box_col + 2, if is_sel { ARW } else { b' ' }, fg);
+    put(row, box_col + 3, b' ', fg);
 
-    let nc = BOX_COL + 4;
+    let nc = box_col + 4;
 
     if let Some(app) = crate::apps::installer::registry::get(slot) {
         // Имя приложения (до 9 символов)
-        let name = app.name_str().as_bytes();
-        let name_len = name.len().min(9);
-        puts(row, nc, &name[..name_len], fg);
+        let name = app.name_str();
+        let name_len = utf8_cell_len(name).min(9);
+        puts_utf8(row, nc, name, fg);
         for p in name_len..9 {
             put(row, nc + p, b' ', fg);
         }
 
-        put(row, BOX_COL + 13, SEP, if is_sel { HILIT } else { BORDER });
+        put(row, box_col + 13, SEP, if is_sel { HILIT } else { BORDER });
 
         // Описание: тип пакета
         let desc = nhs_desc_text(app.flags);
-        puts_utf8(row, BOX_COL + 15, desc, fg);
+        puts_utf8(row, box_col + 15, desc, fg);
 
         // Тег в правой части
         let vtag = nhs_tag_text(app.flags);
-        let tc = BOX_COL + BOX_W + 1 - utf8_cell_len(vtag) - 1;
+        let tc = box_col + BOX_W + 1 - utf8_cell_len(vtag) - 1;
         puts_utf8(row, tc, vtag, if is_sel { HILIT } else { TAG });
     } else {
-        puts(row, nc, b"<empty>  ", fg);
+        puts_utf8(row, nc, "<empty>", fg);
     }
 
-    put(row, BOX_COL + BOX_W + 1, VT, BORDER);
+    put(row, box_col + BOX_W + 1, VT, BORDER);
 }
 
-unsafe fn vt_blank(row: usize) {
-    put(row, BOX_COL, VT, BORDER);
-    fill_seg(row, BOX_COL + 1, BOX_W, BG);
-    put(row, BOX_COL + BOX_W + 1, VT, BORDER);
+unsafe fn vt_blank(row: usize, box_col: usize) {
+    put(row, box_col, VT, BORDER);
+    fill_seg(row, box_col + 1, BOX_W, BG);
+    put(row, box_col + BOX_W + 1, VT, BORDER);
 }

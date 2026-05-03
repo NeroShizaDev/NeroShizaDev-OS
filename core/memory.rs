@@ -26,14 +26,14 @@ unsafe fn active_level_4_table(physical_memory_offset: VirtAddr) -> &'static mut
     unsafe { &mut *page_table_ptr }
 }
 
-/// Создаёт тестовое отображение страницы на фрейм 0xb8000.
+/// Создаёт тестовое отображение страницы на legacy VGA graphics frame 0xA0000.
 pub fn create_example_mapping(
     page: Page,
     mapper: &mut OffsetPageTable,
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
 ) {
     use x86_64::structures::paging::PageTableFlags as Flags;
-    let frame = PhysFrame::containing_address(PhysAddr::new(0xb8000));
+    let frame = PhysFrame::containing_address(PhysAddr::new(0xA0000));
     let flags = Flags::PRESENT | Flags::WRITABLE;
     let map_to_result = unsafe { mapper.map_to(page, frame, flags, frame_allocator) };
     map_to_result.expect("map_to failed").flush();
@@ -96,13 +96,11 @@ unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
 // ============================================================
 // VGA MEMORY MAPPING
 // ============================================================
-// Identity-маппинг VGA-региона 0xA0000-0xBFFFF (128 КБ = 32 страницы).
-// Включает:
-//   0xA0000-0xAFFFF — Mode 13h graphics (для Doom)
-//   0xB8000-0xB8FFF — VGA text buffer (основной вывод ядра)
+// Identity-маппинг legacy VGA graphics/font window 0xA0000-0xAFFFF (64 КБ = 16 страниц).
+// Нужен для Mode 13h graphics и plane-2 font uploads.
 // ============================================================
 
-/// Identity-маппит VGA видеопамять (0xA0000..0xC0000) в page tables.
+/// Identity-маппит legacy VGA graphics/font window (0xA0000..0xB0000) в page tables.
 /// Bootloader 0.11 с Dynamic-маппингом физической памяти НЕ делает этого
 /// автоматически для низких адресов, поэтому мы добавляем вручную.
 pub fn map_vga_memory(
@@ -112,8 +110,8 @@ pub fn map_vga_memory(
     use x86_64::structures::paging::PageTableFlags as Flags;
 
     let flags = Flags::PRESENT | Flags::WRITABLE;
-    // 0xA0000..0xC0000 = 32 страницы по 4 КБ
-    for page_addr in (0xA0000u64..0xC0000).step_by(4096) {
+    // 0xA0000..0xB0000 = 16 страниц по 4 КБ
+    for page_addr in (0xA0000u64..0xB0000).step_by(4096) {
         let page: Page<Size4KiB> = Page::containing_address(VirtAddr::new(page_addr));
         let frame = PhysFrame::containing_address(PhysAddr::new(page_addr));
         // Если страница уже замаплена (bootloader мог замапить) — пропускаем.

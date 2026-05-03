@@ -11,7 +11,7 @@
 use x86_64::instructions::hlt;
 
 // ============================================================
-// VGA размеры
+// Размеры текстовой сетки (совпадают с shadow buffer fb_buffer)
 // ============================================================
 pub const VGA_WIDTH: usize = 80;
 pub const VGA_HEIGHT: usize = 25;
@@ -20,49 +20,46 @@ pub const VGA_HEIGHT: usize = 25;
 static mut VGA_COL: usize = 0;
 static mut VGA_ROW: usize = 0;
 
-/// Записывает одну ячейку в VGA text buffer (прямой доступ к 0xB8000).
-///
-/// # Safety
-/// VGA text buffer identity-mapped загрузчиком. x, y должны быть в [0,VGA_WIDTH) × [0,VGA_HEIGHT).
+// Локальный shadow buffer для прокрутки (символ + цвет)
+static mut SHADOW_CH: [[u8; VGA_WIDTH]; VGA_HEIGHT] = [[b' '; VGA_WIDTH]; VGA_HEIGHT];
+static mut SHADOW_AT: [[u8; VGA_WIDTH]; VGA_HEIGHT] = [[0x07; VGA_WIDTH]; VGA_HEIGHT];
+
+/// Записывает одну ячейку через framebuffer.
 pub unsafe fn write_vga_cell(x: usize, y: usize, byte: u8, color: u8) {
     if x >= VGA_WIDTH || y >= VGA_HEIGHT {
         return;
     }
-    let vga = 0xB8000 as *mut u8;
-    let offset = (y * VGA_WIDTH + x) * 2;
-    *vga.add(offset) = byte;
-    *vga.add(offset + 1) = color;
+    SHADOW_CH[y][x] = byte;
+    SHADOW_AT[y][x] = color;
+    crate::fb_buffer::write_char_at(x, y, byte, color);
 }
 
 /// Заполняет весь экран пробелами, сбрасывает позицию курсора.
-///
-/// # Safety
-/// Прямая запись в VGA buffer. Атрибут «цвет» применяется ко всем ячейкам.
 pub unsafe fn clear_screen(color: u8) {
-    let vga = 0xB8000 as *mut u8;
-    for i in 0..(VGA_WIDTH * VGA_HEIGHT) {
-        *vga.add(i * 2) = b' ';
-        *vga.add(i * 2 + 1) = color;
+    for r in 0..VGA_HEIGHT {
+        for c in 0..VGA_WIDTH {
+            SHADOW_CH[r][c] = b' ';
+            SHADOW_AT[r][c] = color;
+        }
     }
+    crate::fb_buffer::clear_screen();
     VGA_COL = 0;
     VGA_ROW = 0;
 }
 
-/// Прокрутка экрана вверх на одну строку.
+/// Прокрутка экрана вверх на одну строку через shadow buffer.
 unsafe fn scroll_up() {
-    let vga = 0xB8000 as *mut u8;
     for row in 0..(VGA_HEIGHT - 1) {
         for col in 0..VGA_WIDTH {
-            let src = ((row + 1) * VGA_WIDTH + col) * 2;
-            let dst = (row * VGA_WIDTH + col) * 2;
-            *vga.add(dst) = *vga.add(src);
-            *vga.add(dst + 1) = *vga.add(src + 1);
+            SHADOW_CH[row][col] = SHADOW_CH[row + 1][col];
+            SHADOW_AT[row][col] = SHADOW_AT[row + 1][col];
+            crate::fb_buffer::write_char_at(col, row, SHADOW_CH[row][col], SHADOW_AT[row][col]);
         }
     }
     for col in 0..VGA_WIDTH {
-        let offset = ((VGA_HEIGHT - 1) * VGA_WIDTH + col) * 2;
-        *vga.add(offset) = b' ';
-        *vga.add(offset + 1) = 0x07;
+        SHADOW_CH[VGA_HEIGHT - 1][col] = b' ';
+        SHADOW_AT[VGA_HEIGHT - 1][col] = 0x07;
+        crate::fb_buffer::write_char_at(col, VGA_HEIGHT - 1, b' ', 0x07);
     }
     if VGA_ROW > 0 {
         VGA_ROW -= 1;
@@ -141,12 +138,8 @@ pub unsafe fn print_u64(n: u64, color: u8) {
     }
 }
 
-/// Обновляет аппаратный курсор VGA.
-pub unsafe fn sync_cursor() {
-    let pos = (VGA_ROW * VGA_WIDTH + VGA_COL) as u16;
-    crate::vga_hw::write_reg(0x3D4, 0x3D5, 0x0F, (pos & 0xFF) as u8);
-    crate::vga_hw::write_reg(0x3D4, 0x3D5, 0x0E, ((pos >> 8) & 0xFF) as u8);
-}
+/// В framebuffer-режиме аппаратного курсора нет — no-op.
+pub unsafe fn sync_cursor() {}
 
 // ============================================================
 // Псевдо-случайные числа (LCG)

@@ -10,7 +10,6 @@ use core::arch::asm;
 
 const W: usize = 80;
 const H: usize = 25;
-const VGA: usize = 0xB8000;
 const MARCH_STEPS: u32 = 48;
 
 // 10 символов от пустого к плотному — чистый градиент
@@ -132,8 +131,6 @@ fn fpu_cos(a: i64) -> i64 {
 // ============================================================
 
 fn render(angle: i64) {
-    let vga = VGA as *mut u8;
-
     let sa = fpu_sin(angle);
     let ca = fpu_cos(angle);
     // Лёгкий тилт: ~15°
@@ -170,11 +167,7 @@ fn render(angle: i64) {
             let len2 = dx * dx + dy * dy + dz3 * dz3;
             let len = isqrt(len2);
             if len == 0 {
-                let off = (row * W + col) * 2;
-                unsafe {
-                    *vga.add(off) = b' ';
-                    *vga.add(off + 1) = 0;
-                }
+                crate::fb_buffer::write_codepoint_at(col, row, b' ' as u32, 0);
                 continue;
             }
             let ndx = dx * FP / len;
@@ -246,14 +239,7 @@ fn render(angle: i64) {
                 (b' ', 0x00)
             };
 
-            let off = (row * W + col) * 2;
-            // SAFETY: off = (row*W + col)*2, row<H=25, col<W=80 → off < 25*80*2 = 4000.
-            // vga = 0xB8000 identity-mapped; прямая запись без volatile допустима
-            // здесь т.к. WRITER.lock() не используется (menger-loop без блокировок).
-            unsafe {
-                *vga.add(off) = ch;
-                *vga.add(off + 1) = attr;
-            }
+            crate::fb_buffer::write_codepoint_at(col, row, ch as u32, attr);
         }
     }
 }
@@ -263,7 +249,7 @@ fn render(angle: i64) {
 // ============================================================
 
 pub fn run_demo() {
-    crate::vga_buffer::clear_screen();
+    crate::fb_buffer::clear_screen();
 
     // B0.4: drain pending scancodes safely before entering the render loop
     unsafe {
@@ -294,9 +280,9 @@ pub fn run_demo() {
         }
     }
 
-    crate::vga_buffer::clear_screen();
+    crate::fb_buffer::clear_screen();
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::MengerDone),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::MengerDone),
         0x0B,
     );
     // B0.3: do NOT print shell prompt — ActivityManager handles return to shell

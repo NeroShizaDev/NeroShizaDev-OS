@@ -71,7 +71,7 @@ impl VoodooEngine {
             AutomatonMode::Diffusion => "Diffusion (сглаживание)",
             AutomatonMode::QuantumChaos => "QuantumChaos (аппаратный шум + смешение)",
         };
-        crate::user_messages::print_voodoo_mode(mode_str);
+        crate::kernel_messages::print_voodoo_mode(mode_str);
     }
 
     pub fn get_best_question(&mut self) -> Option<usize> {
@@ -83,7 +83,7 @@ impl VoodooEngine {
         if self.question_loop_counter > 15 {
             self.connection_drops += 1;
             crate::locale::print_localized_line(
-                crate::user_messages::current(crate::user_messages::UiText::VoodooLoopBreak),
+                crate::kernel_messages::current(crate::kernel_messages::UiText::VoodooLoopBreak),
                 0x0C,
             );
             self.reset_matrix();
@@ -116,7 +116,9 @@ impl VoodooEngine {
         if self.answer_count > (Q_COUNT as u32) + 2 {
             self.connection_drops += 1;
             crate::locale::print_localized_line(
-                crate::user_messages::current(crate::user_messages::UiText::VoodooTooManyAnswers),
+                crate::kernel_messages::current(
+                    crate::kernel_messages::UiText::VoodooTooManyAnswers,
+                ),
                 0x0C,
             );
             self.reset_matrix();
@@ -297,7 +299,9 @@ impl VoodooEngine {
 
         if asked >= 3 && (max_p - avg) < 0.15 {
             crate::locale::print_localized_line(
-                crate::user_messages::current(crate::user_messages::UiText::VoodooEntropyCollapse),
+                crate::kernel_messages::current(
+                    crate::kernel_messages::UiText::VoodooEntropyCollapse,
+                ),
                 0x0C,
             );
             self.reset_matrix();
@@ -375,7 +379,7 @@ unsafe fn fpu_square(mut val: f32) -> f32 {
 /// options(nomem, nostack) — asm не касается памяти и RSP.
 #[inline(always)]
 unsafe fn hw_noise() -> f32 {
-    let noise: u32 = match crate::rng::random_u64() {
+    let noise: u32 = match crate::apps::rng::random_u64() {
         Some(val) => val as u32,
         None => {
             // SAFETY: RDTSC — непривилегированная инструкция (CR4.TSD=0).
@@ -391,7 +395,7 @@ unsafe fn hw_noise() -> f32 {
 pub fn demo_cellular_automaton() {
     let mut engine = VoodooEngine::new();
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::VoodooDemoHeader),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::VoodooDemoHeader),
         0x0E,
     );
 
@@ -400,7 +404,7 @@ pub fn demo_cellular_automaton() {
 
     for step in 0..8 {
         engine.apply_cellular_tick();
-        crate::user_messages::print_voodoo_step(
+        crate::kernel_messages::print_voodoo_step(
             step,
             engine.probabilities[0],
             engine.probabilities[1],

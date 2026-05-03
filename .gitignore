@@ -17,3 +17,6 @@ ai_chat_history.txt
 
 # Локальные настройки инструментов (не коммитить)
 .claude/
+
+# QEMU firmware blobs (large binaries, not needed in repo)
+tmp/

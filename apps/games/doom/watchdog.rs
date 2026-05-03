@@ -80,13 +80,9 @@ pub fn kernel_bite(code: BiteCode) -> ! {
     crate::serial_println!("[BITE] 0x{:X} :: {}", code, bite_name(code));
     crate::serial_println!("[BITE] KernelBite — system halted.");
 
-    // Вспомогательные функции — прямая запись в VGA 0xB8000, без mutex/alloc.
-    #[inline(always)]
+    // Вспомогательные функции — вывод через framebuffer.
     fn vga_put(row: usize, col: usize, ch: u8, attr: u8) {
-        let vga = 0xB8000 as *mut u16;
-        unsafe {
-            core::ptr::write_volatile(vga.add(row * 80 + col), ((attr as u16) << 8) | ch as u16);
-        }
+        crate::fb_buffer::write_char_at(col, row, ch, attr);
     }
     fn vga_write(row: usize, col: usize, s: &[u8], attr: u8) {
         let mut c = col;
@@ -115,11 +111,7 @@ pub fn kernel_bite(code: BiteCode) -> ! {
         }
     }
 
-    // Восстанавливаем текстовый режим из Mode 13h (если активен).
-    // Не вызываем load_static_glyphs — нам нужен только ASCII 32-127.
-    unsafe {
-        super::vga_graphics::restore_text_mode();
-    }
+    crate::fb_buffer::clear_screen();
 
     const ATTR_BG: u8 = 0x0F; // белый текст, чёрный фон
     const ATTR_FRAME: u8 = 0xDF; // белый текст, пурпурный фон (как у DF-экрана)

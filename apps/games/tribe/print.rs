@@ -1,10 +1,9 @@
-// print.rs — вывод текста игры через vga_unicode.rs
+// print.rs — вывод текста игры через fb_buffer
 //
 // Вся цепочка:
 //   &'static str (UTF-8 кириллица в db.rs)
 //     → chars() → char as u32 (codepoint)
-//       → vga_unicode::codepoint_to_vga_byte(cp)
-//         → write_vga_cell(x, y, byte, color)
+//       → fb_buffer::write_codepoint_at(x, y, cp, color)
 //
 // Никаких аллокаций. Никаких String. Только стек.
 
@@ -28,6 +27,10 @@ pub const ЦВЕТ_РАМКА: u8 = 0x09; // синий
 
 static mut CURSOR_X: usize = 0;
 static mut CURSOR_Y: usize = 0;
+
+// Shadow buffer для прокрутки в framebuffer-режиме
+static mut SHADOW_CP: [[u32; 80]; 25] = [[b' ' as u32; 80]; 25];
+static mut SHADOW_AT: [[u8; 80]; 25] = [[0x07; 80]; 25];
 
 pub fn cursor_reset() {
     unsafe {
@@ -74,7 +77,10 @@ pub fn print_char_adv(c: char, color: u8) {
                 CURSOR_X = 0;
             }
             _ => {
-                let consumed = print_char(c as u32, CURSOR_X, CURSOR_Y, color).max(1);
+                let cp = c as u32;
+                SHADOW_CP[CURSOR_Y][CURSOR_X] = cp;
+                SHADOW_AT[CURSOR_Y][CURSOR_X] = color;
+                let consumed = print_char(cp, CURSOR_X, CURSOR_Y, color).max(1);
 
                 CURSOR_X += consumed;
                 if CURSOR_X >= cols() {
@@ -150,23 +156,21 @@ pub fn print_inum(n: i32, color: u8) {
 /// Сдвигаем всё содержимое экрана на 1 строку вверх
 fn scroll_up() {
     unsafe {
-        let base = 0xB8000 as *mut u16;
         let cols = cols();
         let rows = rows();
-        // Копируем строки 1..rows в строки 0..rows-1
+        // Сдвигаем shadow buffer и перерисовываем через fb_buffer
         for y in 0..rows - 1 {
             for x in 0..cols {
-                let src = (y + 1) * cols + x;
-                let dst = y * cols + x;
-                let val = core::ptr::read_volatile(base.add(src));
-                core::ptr::write_volatile(base.add(dst), val);
+                SHADOW_CP[y][x] = SHADOW_CP[y + 1][x];
+                SHADOW_AT[y][x] = SHADOW_AT[y + 1][x];
+                crate::fb_buffer::write_codepoint_at(x, y, SHADOW_CP[y][x], SHADOW_AT[y][x]);
             }
         }
         // Очищаем последнюю строку
-        let blank: u16 = (ЦВЕТ_ОБЫЧНЫЙ as u16) << 8 | b' ' as u16;
         for x in 0..cols {
-            let dst = (rows - 1) * cols + x;
-            core::ptr::write_volatile(base.add(dst), blank);
+            SHADOW_CP[rows - 1][x] = b' ' as u32;
+            SHADOW_AT[rows - 1][x] = ЦВЕТ_ОБЫЧНЫЙ;
+            crate::fb_buffer::write_codepoint_at(x, rows - 1, b' ' as u32, ЦВЕТ_ОБЫЧНЫЙ);
         }
     }
 }
@@ -174,11 +178,13 @@ fn scroll_up() {
 /// Очистить весь экран
 pub fn clear_screen() {
     unsafe {
-        let base = 0xB8000 as *mut u16;
-        let blank: u16 = (ЦВЕТ_ОБЫЧНЫЙ as u16) << 8 | b' ' as u16;
-        for i in 0..cols() * rows() {
-            core::ptr::write_volatile(base.add(i), blank);
+        for y in 0..25 {
+            for x in 0..80 {
+                SHADOW_CP[y][x] = b' ' as u32;
+                SHADOW_AT[y][x] = ЦВЕТ_ОБЫЧНЫЙ;
+            }
         }
+        crate::fb_buffer::clear_screen();
         CURSOR_X = 0;
         CURSOR_Y = 0;
     }
@@ -187,10 +193,10 @@ pub fn clear_screen() {
 /// Очистить одну строку
 pub fn clear_line(y: usize) {
     unsafe {
-        let base = 0xB8000 as *mut u16;
-        let blank: u16 = (ЦВЕТ_ОБЫЧНЫЙ as u16) << 8 | b' ' as u16;
         for x in 0..cols() {
-            core::ptr::write_volatile(base.add(y * cols() + x), blank);
+            SHADOW_CP[y][x] = b' ' as u32;
+            SHADOW_AT[y][x] = ЦВЕТ_ОБЫЧНЫЙ;
+            crate::fb_buffer::write_codepoint_at(x, y, b' ' as u32, ЦВЕТ_ОБЫЧНЫЙ);
         }
     }
 }

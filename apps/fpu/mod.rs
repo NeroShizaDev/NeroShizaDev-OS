@@ -120,15 +120,8 @@ pub fn shannon_entropy(data: &[u8]) -> u64 {
 
 // ── TUI helpers ──────────────────────────────────────────────────────────────
 
-const VGA: *mut u8 = 0xb8000 as *mut u8;
-
 unsafe fn vput(row: usize, col: usize, ch: u8, color: u8) {
-    if row >= 25 || col >= 80 {
-        return;
-    }
-    let off = (row * 80 + col) * 2;
-    core::ptr::write_volatile(VGA.add(off), ch);
-    core::ptr::write_volatile(VGA.add(off + 1), color);
+    crate::fb_buffer::write_char_at(col, row, ch, color);
 }
 
 unsafe fn vfill(row: usize, col: usize, len: usize, color: u8) {

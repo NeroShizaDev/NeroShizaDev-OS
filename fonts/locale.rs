@@ -3,11 +3,11 @@
 // ============================================================
 // Слои пайплайна:
 //   KernelEvent
-//     -> get_event_text(locale, ev)      [kernel_messages]
-//     -> numeral substitution             [locale::map_digit]
+//     -> get_event_text(locale, ev)        [kernel_messages]
+//     -> numeral substitution               [locale::map_digit]
 //     -> text direction (LTR / RTL)
-//     -> glyph lookup (vga_unicode cache) [vga_unicode]
-//     -> VGA text buffer                  [0xB8000]
+//     -> glyph rendering                    [fb_buffer]
+//     -> crash-only VGA helpers             [panic/exception paths]
 // ============================================================
 
 use core::fmt::{self, Write};
@@ -84,6 +84,82 @@ pub fn map_digit_char(c: char, sys: NumeralSystem) -> char {
 
 fn map_display_char(c: char, sys: NumeralSystem) -> char {
     map_digit_char(c, sys)
+}
+
+pub fn map_shell_input_char(c: char, russian_layout: bool) -> char {
+    if !russian_layout {
+        return c;
+    }
+
+    match c {
+        'q' => 'й',
+        'w' => 'ц',
+        'e' => 'у',
+        'r' => 'к',
+        't' => 'е',
+        'y' => 'н',
+        'u' => 'г',
+        'i' => 'ш',
+        'o' => 'щ',
+        'p' => 'з',
+        '[' => 'х',
+        ']' => 'ъ',
+        'a' => 'ф',
+        's' => 'ы',
+        'd' => 'в',
+        'f' => 'а',
+        'g' => 'п',
+        'h' => 'р',
+        'j' => 'о',
+        'k' => 'л',
+        'l' => 'д',
+        ';' => 'ж',
+        '\'' => 'э',
+        'z' => 'я',
+        'x' => 'ч',
+        'c' => 'с',
+        'v' => 'м',
+        'b' => 'и',
+        'n' => 'т',
+        'm' => 'ь',
+        ',' => 'б',
+        '.' => 'ю',
+        'Q' => 'Й',
+        'W' => 'Ц',
+        'E' => 'У',
+        'R' => 'К',
+        'T' => 'Е',
+        'Y' => 'Н',
+        'U' => 'Г',
+        'I' => 'Ш',
+        'O' => 'Щ',
+        'P' => 'З',
+        '{' => 'Х',
+        '}' => 'Ъ',
+        'A' => 'Ф',
+        'S' => 'Ы',
+        'D' => 'В',
+        'F' => 'А',
+        'G' => 'П',
+        'H' => 'Р',
+        'J' => 'О',
+        'K' => 'Л',
+        'L' => 'Д',
+        ':' => 'Ж',
+        '"' => 'Э',
+        'Z' => 'Я',
+        'X' => 'Ч',
+        'C' => 'С',
+        'V' => 'М',
+        'B' => 'И',
+        'N' => 'Т',
+        'M' => 'Ь',
+        '<' => 'Б',
+        '>' => 'Ю',
+        '`' => 'ё',
+        '~' => 'Ё',
+        _ => c,
+    }
 }
 
 struct LocalizedBuffer {
@@ -194,26 +270,63 @@ pub fn print_localized_line(text: &str, color: u8) {
     print_localized_fmt(color, format_args!("{}", text));
 }
 
+#[inline]
+fn boot_text_row() -> usize {
+    if crate::fb_buffer::is_initialized() {
+        crate::fb_buffer::current_row()
+    } else {
+        1
+    }
+}
+
+#[inline]
+fn boot_text_last_col() -> usize {
+    if crate::fb_buffer::is_initialized() {
+        crate::fb_buffer::default_text_last_col()
+    } else {
+        79
+    }
+}
+
+#[inline]
+fn boot_text_cols() -> usize {
+    if crate::fb_buffer::is_initialized() {
+        crate::fb_buffer::default_text_cols()
+    } else {
+        80
+    }
+}
+
+#[inline]
+fn boot_text_left_col() -> usize {
+    if crate::fb_buffer::is_initialized() {
+        crate::fb_buffer::default_text_left_col()
+    } else {
+        0
+    }
+}
+
 pub fn print_localized_fmt(color: u8, args: fmt::Arguments) {
     let mut buf = LocalizedBuffer::new();
     let _ = buf.write_fmt(args);
-
-    crate::println!("");
+    let row = boot_text_row();
+    let left_col = boot_text_left_col();
+    let last_col = boot_text_last_col();
 
     unsafe {
         let spec = locale_spec(get_locale());
         match spec.direction {
             TextDirection::Ltr => {
-                write_codepoints_ltr_direct(buf.as_slice(), 24, 0, color, spec.numerals)
+                write_codepoints_ltr_direct(buf.as_slice(), row, left_col, color, spec.numerals)
             }
             TextDirection::Rtl => {
-                write_codepoints_rtl_direct(buf.as_slice(), 24, 79, color, spec.numerals)
+                write_codepoints_rtl_direct(buf.as_slice(), row, last_col, color, spec.numerals)
             }
         }
     }
 
     x86_64::instructions::interrupts::without_interrupts(|| {
-        crate::vga_buffer::WRITER.lock().column_position = 0;
+        crate::fb_buffer::advance_line();
     });
 }
 
@@ -242,7 +355,10 @@ pub fn print_boot_status_fmt(args: fmt::Arguments) {
 /// остаток опять жёлтым. Все вхождения "ОК"/"OK" красятся зелёным.
 /// Только LTR (для Arabic fallback — вся строка жёлтая).
 pub fn print_boot_status(msg: &str) {
-    crate::println!("");
+    let row = boot_text_row();
+    let left_col = boot_text_left_col();
+    let last_col = boot_text_last_col();
+    let max_cols = boot_text_cols();
 
     unsafe {
         let spec = locale_spec(get_locale());
@@ -250,7 +366,7 @@ pub fn print_boot_status(msg: &str) {
         if matches!(spec.direction, TextDirection::Rtl) {
             let mut buf = LocalizedBuffer::new();
             let _ = buf.write_str(msg);
-            write_codepoints_rtl_direct(buf.as_slice(), 24, 79, 0x0E, spec.numerals);
+            write_codepoints_rtl_direct(buf.as_slice(), row, last_col, 0x0E, spec.numerals);
         } else {
             // Разбиваем строку на сегменты: чередуем yellow и green для каждого ОК/OK
             let mut col: usize = 0;
@@ -273,8 +389,8 @@ pub fn print_boot_status(msg: &str) {
                             let _ = pre.write_str(&remaining[..idx]);
                             write_codepoints_ltr_direct(
                                 pre.as_slice(),
-                                24,
-                                col.min(79),
+                                row,
+                                left_col + col.min(max_cols.saturating_sub(1)),
                                 0x0E,
                                 spec.numerals,
                             );
@@ -285,8 +401,8 @@ pub fn print_boot_status(msg: &str) {
                         let _ = ok.write_str(&remaining[idx..idx + ok_len]);
                         write_codepoints_ltr_direct(
                             ok.as_slice(),
-                            24,
-                            col.min(79),
+                            row,
+                            left_col + col.min(max_cols.saturating_sub(1)),
                             0x0A,
                             spec.numerals,
                         );
@@ -300,8 +416,8 @@ pub fn print_boot_status(msg: &str) {
                             let _ = suf.write_str(remaining);
                             write_codepoints_ltr_direct(
                                 suf.as_slice(),
-                                24,
-                                col.min(79),
+                                row,
+                                left_col + col.min(max_cols.saturating_sub(1)),
                                 0x0E,
                                 spec.numerals,
                             );
@@ -314,7 +430,7 @@ pub fn print_boot_status(msg: &str) {
     }
 
     x86_64::instructions::interrupts::without_interrupts(|| {
-        crate::vga_buffer::WRITER.lock().column_position = 0;
+        crate::fb_buffer::advance_line();
     });
 }
 
@@ -329,7 +445,6 @@ pub fn print_boot_status(msg: &str) {
 /// EN: "loaded" и "active" — зелёные.
 /// AR: "محمل" и "مفعلة" — жёлтые (RTL fallback).
 pub fn print_phase6_ok() {
-    crate::println!("");
     unsafe {
         let spec = locale_spec(get_locale());
         let segments: &[(&str, u8)] = match get_locale() {
@@ -349,25 +464,35 @@ pub fn print_phase6_ok() {
                 &[("[المرحلة 6] الخط: Cyrillic محمل | اللغة: مفعلة", 0x0E)]
             }
         };
+        let row = boot_text_row();
+        let left_col = boot_text_left_col();
+        let last_col = boot_text_last_col();
+        let max_cols = boot_text_cols();
         if matches!(spec.direction, TextDirection::Rtl) {
             // RTL: одна строка целиком
             if let Some(&(text, color)) = segments.first() {
                 let mut buf = LocalizedBuffer::new();
                 let _ = buf.write_str(text);
-                write_codepoints_rtl_direct(buf.as_slice(), 24, 79, color, spec.numerals);
+                write_codepoints_rtl_direct(buf.as_slice(), row, last_col, color, spec.numerals);
             }
         } else {
             let mut col: usize = 0;
             for &(text, color) in segments {
                 let mut buf = LocalizedBuffer::new();
                 let _ = buf.write_str(text);
-                write_codepoints_ltr_direct(buf.as_slice(), 24, col.min(79), color, spec.numerals);
+                write_codepoints_ltr_direct(
+                    buf.as_slice(),
+                    row,
+                    left_col + col.min(max_cols.saturating_sub(1)),
+                    color,
+                    spec.numerals,
+                );
                 col += buf.as_slice().len();
             }
         }
     }
     x86_64::instructions::interrupts::without_interrupts(|| {
-        crate::vga_buffer::WRITER.lock().column_position = 0;
+        crate::fb_buffer::advance_line();
     });
 }
 
@@ -378,93 +503,59 @@ pub fn print_rtl_line(text: &str, color: u8) {
 }
 
 // ============================================================
-// PANIC SCREEN — прямой VGA доступ без блокировок.
+// PANIC SCREEN — прямой framebuffer-доступ без блокировок.
 // Вызывать из обработчиков исключений и panic handler.
 // НЕБЕЗОПАСНО: не использовать вне контекста краша/паники.
 // ============================================================
 
-/// Рисует экран аварии прямо в VGA (без mutex, без прерываний).
-/// Фиолетовая рамка, чёрный фон внутри.
-/// Безопасно в любом контексте (включая double fault handler).
+/// Рисует экран аварии прямо в framebuffer (без mutex, без прерываний).
+/// Если framebuffer ещё не поднят, визуальный вывод пропускается и остаётся serial.
 pub unsafe fn render_panic_screen(ev: KernelEvent) {
+    if !crate::fb_buffer::is_initialized() {
+        return;
+    }
+
     const ATTR_FRAME: u8 = 0x5F; // White on Magenta  — рамка
     const ATTR_TITLE: u8 = 0x5E; // Yellow on Magenta — заголовок в рамке
     const ATTR_TEXT: u8 = 0x0F; // Bright White on Black — основной текст
     const ATTR_LORE: u8 = 0x0D; // Bright Magenta on Black — lore / акценты
     const ATTR_HINT: u8 = 0x07; // Light Gray on Black — подсказка
-    const VGA: *mut u8 = 0xB8000 as *mut u8;
     const W: usize = 80;
-
-    // --- ПЕРВЫМ ДЕЛОМ: гарантируем текстовый режим VGA ---
-    // Если краш произошёл внутри enter_font_mode() (plane 2 selected),
-    // все записи в 0xB8000 шли бы в шрифтовую плоскость вместо текстового
-    // буфера. exit_font_mode() восстанавливает planes 0+1 и text mapping.
-    crate::vga_hw::exit_font_mode();
-
-    // --- Перезагружаем кириллические глифы в plane 2 ---
-    // Глифы могли быть повреждены (запись в VGA во время font mode)
-    // или не загружены (краш до Фазы 6). Перезагрузка безопасна:
-    // enter/exit_font_mode внутри, прерывания отключены (exception context).
-    crate::vga_unicode::load_static_glyphs();
 
     // --- Заливаем весь экран чёрным ---
     for row in 0..25 {
         for col in 0..W {
-            let off = (row * W + col) * 2;
-            core::ptr::write_volatile(VGA.add(off), b' ');
-            core::ptr::write_volatile(VGA.add(off + 1), 0x00);
+            crate::fb_buffer::write_char_at(col, row, b' ', 0x00);
         }
     }
 
     // --- Рисуем двойную рамку (CP437: ╔═╗║╚═╝) ---
-    // Верхняя линия (строка 0)
-    let off_tl = 0usize;
-    core::ptr::write_volatile(VGA.add(off_tl), 0xC9); // ╔
-    core::ptr::write_volatile(VGA.add(off_tl + 1), ATTR_FRAME);
+    crate::fb_buffer::write_char_at(0, 0, 0xC9, ATTR_FRAME);
     for col in 1..79 {
-        let off = col * 2;
-        core::ptr::write_volatile(VGA.add(off), 0xCD); // ═
-        core::ptr::write_volatile(VGA.add(off + 1), ATTR_FRAME);
+        crate::fb_buffer::write_char_at(col, 0, 0xCD, ATTR_FRAME);
     }
-    let off_tr = 79 * 2;
-    core::ptr::write_volatile(VGA.add(off_tr), 0xBB); // ╗
-    core::ptr::write_volatile(VGA.add(off_tr + 1), ATTR_FRAME);
+    crate::fb_buffer::write_char_at(79, 0, 0xBB, ATTR_FRAME);
 
-    // Боковые линии (строки 1..23)
     for row in 1..24 {
-        let off_l = (row * W) * 2;
-        core::ptr::write_volatile(VGA.add(off_l), 0xBA); // ║
-        core::ptr::write_volatile(VGA.add(off_l + 1), ATTR_FRAME);
-        let off_r = (row * W + 79) * 2;
-        core::ptr::write_volatile(VGA.add(off_r), 0xBA); // ║
-        core::ptr::write_volatile(VGA.add(off_r + 1), ATTR_FRAME);
+        crate::fb_buffer::write_char_at(0, row, 0xBA, ATTR_FRAME);
+        crate::fb_buffer::write_char_at(79, row, 0xBA, ATTR_FRAME);
     }
 
-    // Нижняя линия (строка 24)
-    let off_bl = (24 * W) * 2;
-    core::ptr::write_volatile(VGA.add(off_bl), 0xC8); // ╚
-    core::ptr::write_volatile(VGA.add(off_bl + 1), ATTR_FRAME);
+    crate::fb_buffer::write_char_at(0, 24, 0xC8, ATTR_FRAME);
     for col in 1..79 {
-        let off = (24 * W + col) * 2;
-        core::ptr::write_volatile(VGA.add(off), 0xCD); // ═
-        core::ptr::write_volatile(VGA.add(off + 1), ATTR_FRAME);
+        crate::fb_buffer::write_char_at(col, 24, 0xCD, ATTR_FRAME);
     }
-    let off_br = (24 * W + 79) * 2;
-    core::ptr::write_volatile(VGA.add(off_br), 0xBC); // ╝
-    core::ptr::write_volatile(VGA.add(off_br + 1), ATTR_FRAME);
+    crate::fb_buffer::write_char_at(79, 24, 0xBC, ATTR_FRAME);
 
     // --- Строка 0: заголовок в рамке ---
     let hdr = b">>> NeroShizaDev-OS KERNEL EVENT <<<";
-    let hdr_start = (W - hdr.len()) / 2; // центрируем
+    let hdr_start = (W - hdr.len()) / 2;
     for (i, &b) in hdr.iter().enumerate() {
-        let off = (hdr_start + i) * 2;
-        core::ptr::write_volatile(VGA.add(off), b);
-        core::ptr::write_volatile(VGA.add(off + 1), ATTR_TITLE);
+        crate::fb_buffer::write_char_at(hdr_start + i, 0, b, ATTR_TITLE);
     }
 
     let locale = get_locale();
     let mode = get_mode();
-    let ru_entry = get_event_text(Locale::RuRu, ev);
     let en_entry = get_event_text(Locale::EnUs, ev);
 
     // --- Строка 2: код события + локаль + режим ---
@@ -478,96 +569,43 @@ pub unsafe fn render_panic_screen(ev: KernelEvent) {
     write_crash_text_at_vga(mod_name, 2, 12, ATTR_TEXT);
     write_crash_text_at_vga("]", 2, 16, ATTR_TEXT);
 
-    // --- Строки 4..7: RU + EN одновременно ---
-    write_crash_text_at_vga(ru_entry.lore, 4, 2, ATTR_LORE);
-    write_ascii_at_vga(en_entry.lore, 5, 2, ATTR_LORE);
-    write_crash_text_at_vga(ru_entry.technical, 6, 2, ATTR_TEXT);
-    write_ascii_at_vga(en_entry.technical, 7, 2, ATTR_TEXT);
+    // --- Строки 4..5: panic path stays ASCII-only for reliability ---
+    write_ascii_at_vga(en_entry.lore, 4, 2, ATTR_LORE);
+    write_ascii_at_vga(en_entry.technical, 5, 2, ATTR_TEXT);
 
     // --- Строка 9: код аварии 0xBEDABEDA01 ---
-    write_crash_text_at_vga(
-        "0xBEDABEDA01  \u{0441}\u{0438}\u{0441}\u{0442}\u{0435}\u{043C}\u{0430} \u{0441}\u{0434}\u{043E}\u{0445}\u{043B}\u{0430}!",
-        9,
-        2,
-        ATTR_LORE,
-    );
-    write_ascii_at_vga("/ system crashed!", 9, 27, ATTR_LORE);
+    write_ascii_at_vga("0xBEDABEDA01 / system crashed!", 9, 2, ATTR_LORE);
 
     // --- Строка 11: модуль (имя события) ---
-    write_crash_text_at_vga(
-        "\u{041C}\u{043E}\u{0434}\u{0443}\u{043B}\u{044C} / Module: ",
-        11,
-        2,
-        ATTR_TEXT,
-    );
+    write_ascii_at_vga("Module: ", 11, 2, ATTR_TEXT);
     write_ascii_at_vga(ev_name, 11, 19, ATTR_LORE);
 
     // --- Строки 13..14: быстрая подсказка по шаблону падения ---
     if crate::trace::contains_recent("timer irq0 eoi sent") {
-        write_crash_text_at_vga(
-            "\u{041F}\u{043E}\u{0441}\u{043B}\u{0435} IRQ0 \u{0432}\u{043E}\u{0437}\u{0432}\u{0440}\u{0430}\u{0442}\u{0430} / After IRQ0 return",
-            13,
-            2,
-            ATTR_HINT,
-        );
+        write_ascii_at_vga("After IRQ0 return", 13, 2, ATTR_HINT);
     }
     if ev == KernelEvent::DoubleFault {
         if crate::trace::contains_recent("general protection handler entered") {
-            write_crash_text_at_vga(
-                "\u{041F}\u{0435}\u{0440}\u{0432}\u{0438}\u{0447}\u{043D}\u{043E}: GP / Primary fault: GP",
-                14,
-                2,
-                ATTR_HINT,
-            );
+            write_ascii_at_vga("Primary fault: GP", 14, 2, ATTR_HINT);
         } else if crate::trace::contains_recent("page fault handler entered") {
-            write_crash_text_at_vga(
-                "\u{041F}\u{0435}\u{0440}\u{0432}\u{0438}\u{0447}\u{043D}\u{043E}: PF / Primary fault: PF",
-                14,
-                2,
-                ATTR_HINT,
-            );
+            write_ascii_at_vga("Primary fault: PF", 14, 2, ATTR_HINT);
         } else if crate::trace::contains_recent("breakpoint handler entered") {
-            write_crash_text_at_vga(
-                "\u{041F}\u{0435}\u{0440}\u{0432}\u{0438}\u{0447}\u{043D}\u{043E}: BP / Primary fault: BP",
-                14,
-                2,
-                ATTR_HINT,
-            );
+            write_ascii_at_vga("Primary fault: BP", 14, 2, ATTR_HINT);
         } else if crate::trace::contains_recent("timer irq0 entered") {
-            write_crash_text_at_vga(
-                "\u{041F}\u{0435}\u{0440}\u{0432}\u{0438}\u{0447}\u{043D}\u{043E}: IRQ0 / Primary fault: IRQ0",
-                14,
-                2,
-                ATTR_HINT,
-            );
+            write_ascii_at_vga("Primary fault: IRQ0", 14, 2, ATTR_HINT);
         }
     } else if ev == KernelEvent::GeneralProtection {
-        write_crash_text_at_vga(
-            "GP \u{043F}\u{043E}\u{0439}\u{043C}\u{0430}\u{043D} / GP captured before DF",
-            14,
-            2,
-            ATTR_HINT,
-        );
+        write_ascii_at_vga("GP captured before DF", 14, 2, ATTR_HINT);
     }
 
     // --- Строки 18..22: последние действия ядра ---
-    write_crash_text_at_vga(
-        "\u{041F}\u{043E}\u{0441}\u{043B}\u{0435}\u{0434}\u{043D}\u{0438}\u{0435} \u{0434}\u{0435}\u{0439}\u{0441}\u{0442}\u{0432}\u{0438}\u{044F} / Last actions:",
-        18,
-        2,
-        ATTR_TEXT,
-    );
+    write_ascii_at_vga("Last actions:", 18, 2, ATTR_TEXT);
     let trace_len = crate::trace::len();
     let first = trace_len.saturating_sub(4);
     let mut row = 19usize;
     let mut idx = first;
     if trace_len == 0 {
-        write_crash_text_at_vga(
-            "- \u{0442}\u{0440}\u{0435}\u{0439}\u{0441} \u{043F}\u{0443}\u{0441}\u{0442} / no trace recorded",
-            19,
-            2,
-            ATTR_HINT,
-        );
+        write_ascii_at_vga("- no trace recorded", 19, 2, ATTR_HINT);
     }
     while idx < trace_len && row < 23 {
         if let Some(action) = crate::trace::get_recent(idx) {
@@ -579,77 +617,39 @@ pub unsafe fn render_panic_screen(ev: KernelEvent) {
     }
 
     // --- Строка 23: подсказка ---
-    write_crash_text_at_vga(
-        "\u{0421}\u{0438}\u{0441}\u{0442}\u{0435}\u{043C}\u{0430} \u{043E}\u{0441}\u{0442}\u{0430}\u{043D}\u{043E}\u{0432}\u{043B}\u{0435}\u{043D}\u{0430} / System halted. Reset or power cycle.",
-        23,
-        9,
-        ATTR_HINT,
-    );
+    write_ascii_at_vga("System halted. Reset or power cycle.", 23, 9, ATTR_HINT);
 }
 
 fn trace_action_label(action: &'static str) -> &'static str {
     match action {
-        "heap initialized" => {
-            "\u{043A}\u{0443}\u{0447}\u{0430} \u{0433}\u{043E}\u{0442}\u{043E}\u{0432}\u{0430} / heap initialized"
-        }
-        "vga mapped + text mode" => {
-            "VGA \u{0433}\u{043E}\u{0442}\u{043E}\u{0432} / VGA mapped + text mode"
-        }
-        "vga detect complete" => {
-            "VGA \u{043E}\u{043F}\u{0440}\u{043E}\u{0441} / VGA detect complete"
-        }
-        "gdt idt pics fpu ready" => {
-            "CPU \u{0444}\u{0430}\u{0437}\u{0430} \u{0433}\u{043E}\u{0442}\u{043E}\u{0432}\u{0430} / CPU init ready"
-        }
-        "rtc validator phase done" => {
-            "RTC \u{0438} validator \u{0433}\u{043E}\u{0442}\u{043E}\u{0432}\u{044B} / RTC validator done"
-        }
-        "ps2 probe complete" => {
-            "PS/2 \u{043E}\u{043F}\u{0440}\u{043E}\u{0441} \u{0433}\u{043E}\u{0442}\u{043E}\u{0432} / PS/2 probe done"
-        }
-        "font + locale ready" => {
-            "\u{0448}\u{0440}\u{0438}\u{0444}\u{0442}\u{044B} \u{0438} \u{043B}\u{043E}\u{043A}\u{0430}\u{043B}\u{044C} \u{0433}\u{043E}\u{0442}\u{043E}\u{0432}\u{044B} / font + locale ready"
-        }
-        "shell prompt drawn" => {
-            "shell \u{0433}\u{043E}\u{0442}\u{043E}\u{0432} / shell prompt drawn"
-        }
-        "interrupts enabled" => {
-            "\u{043F}\u{0440}\u{0435}\u{0440}\u{044B}\u{0432}\u{0430}\u{043D}\u{0438}\u{044F} \u{0432}\u{043A}\u{043B}\u{044E}\u{0447}\u{0435}\u{043D}\u{044B} / interrupts enabled"
-        }
-        "timer irq0 entered" => {
-            "\u{0442}\u{0430}\u{0439}\u{043C}\u{0435}\u{0440} irq0 \u{0432}\u{0445}\u{043E}\u{0434} / timer irq0 entered"
-        }
-        "timer irq0 eoi sent" => {
-            "\u{0442}\u{0430}\u{0439}\u{043C}\u{0435}\u{0440} irq0 EOI / timer irq0 eoi sent"
-        }
-        "panic handler entered" => {
-            "panic \u{043E}\u{0431}\u{0440}\u{0430}\u{0431}\u{043E}\u{0442}\u{0447}\u{0438}\u{043A} / panic handler entered"
-        }
-        "page fault handler entered" => {
-            "page fault \u{043E}\u{0431}\u{0440}\u{0430}\u{0431}\u{043E}\u{0442}\u{0447}\u{0438}\u{043A} / page fault handler entered"
-        }
-        "general protection handler entered" => {
-            "GP \u{043E}\u{0431}\u{0440}\u{0430}\u{0431}\u{043E}\u{0442}\u{0447}\u{0438}\u{043A} / GP handler entered"
-        }
-        "double fault handler entered" => {
-            "double fault \u{043E}\u{0431}\u{0440}\u{0430}\u{0431}\u{043E}\u{0442}\u{0447}\u{0438}\u{043A} / DF handler entered"
-        }
-        "breakpoint handler entered" => {
-            "breakpoint \u{043E}\u{0431}\u{0440}\u{0430}\u{0431}\u{043E}\u{0442}\u{0447}\u{0438}\u{043A} / BP handler entered"
-        }
+        "heap initialized" => "heap initialized",
+        "vga mapped + text mode" => "VGA mapped + text mode",
+        "vga detect complete" => "VGA detect complete",
+        "gdt idt pics fpu ready" => "CPU init ready",
+        "rtc validator phase done" => "RTC validator done",
+        "ps2 probe complete" => "PS/2 probe done",
+        "font + locale ready" => "font + locale ready",
+        "shell prompt drawn" => "shell prompt drawn",
+        "interrupts enabled" => "interrupts enabled",
+        "timer irq0 entered" => "timer irq0 entered",
+        "timer irq0 eoi sent" => "timer irq0 eoi sent",
+        "panic handler entered" => "panic handler entered",
+        "page fault handler entered" => "page fault handler entered",
+        "general protection handler entered" => "GP handler entered",
+        "double fault handler entered" => "DF handler entered",
+        "breakpoint handler entered" => "BP handler entered",
         _ => action,
     }
 }
 
 // ============================================================
-// ВНУТРЕННИЕ ФУНКЦИИ ПРЯМОГО ВЫВОДА В VGA
+// ВНУТРЕННИЕ ФУНКЦИИ ПРЯМОГО ВЫВОДА В FRAMEBUFFER
 // ============================================================
 
-/// Записывает строку LTR в VGA по координатам (row, start_col).
-/// Для каждого символа пытается найти VGA-байт через шрифт/кэш.
+/// Записывает строку LTR по координатам (row, start_col) через framebuffer.
 ///
 /// # Safety
-/// row < 25, start_col < 80. VGA text buffer 0xB8000 identity-mapped.
+/// row < 25, start_col < 80.
 pub unsafe fn write_str_at_vga(s: &str, row: usize, start_col: usize, attr: u8) {
     debug_assert!(row < 25, "write_str_at_vga: row={} >= 25", row);
     debug_assert!(
@@ -657,18 +657,14 @@ pub unsafe fn write_str_at_vga(s: &str, row: usize, start_col: usize, attr: u8) 
         "write_str_at_vga: start_col={} >= 80",
         start_col
     );
-    // SAFETY: offset = (row*80 + col)*2, row<25 col<80 → offset < 8000 < 4KB VGA text page.
     let numerals = locale_spec(get_locale()).numerals;
-    let vga = 0xB8000 as *mut u8;
     let mut col = start_col;
     for c in s.chars() {
         if col >= 80 {
             break;
         }
-        let byte = codepoint_to_vga_byte(map_display_char(c, numerals));
-        let off = (row * 80 + col) * 2;
-        core::ptr::write_volatile(vga.add(off), byte);
-        core::ptr::write_volatile(vga.add(off + 1), attr);
+        let mapped = map_display_char(c, numerals);
+        crate::fb_buffer::write_codepoint_at(col, row, mapped as u32, attr);
         col += 1;
     }
 }
@@ -680,18 +676,23 @@ unsafe fn write_ascii_at_vga(s: &str, row: usize, start_col: usize, attr: u8) {
         "write_ascii_at_vga: start_col={} >= 80",
         start_col
     );
-    let vga = 0xB8000 as *mut u8;
     let mut col = start_col;
     for &byte in s.as_bytes() {
         if col >= 80 {
             break;
         }
-        let glyph = if byte.is_ascii() { byte } else { b'?' };
-        let off = (row * 80 + col) * 2;
-        core::ptr::write_volatile(vga.add(off), glyph);
-        core::ptr::write_volatile(vga.add(off + 1), attr);
+        let cp = if byte.is_ascii() {
+            byte as u32
+        } else {
+            b'?' as u32
+        };
+        crate::fb_buffer::write_codepoint_at(col, row, cp, attr);
         col += 1;
     }
+}
+
+pub unsafe fn write_ascii_str_at_vga(s: &str, row: usize, start_col: usize, attr: u8) {
+    write_ascii_at_vga(s, row, start_col, attr);
 }
 
 unsafe fn write_crash_text_at_vga(s: &str, row: usize, start_col: usize, attr: u8) {
@@ -701,30 +702,13 @@ unsafe fn write_crash_text_at_vga(s: &str, row: usize, start_col: usize, attr: u
         "write_crash_text_at_vga: start_col={} >= 80",
         start_col
     );
-    let vga = 0xB8000 as *mut u8;
-    let mut col = start_col;
-    for c in s.chars() {
-        if col >= 80 {
-            break;
-        }
-        let byte = if c.is_ascii() {
-            c as u8
-        } else if let Some(byte) = crate::vga_unicode::cyrillic_to_vga(c) {
-            byte
-        } else {
-            b'?'
-        };
-        let off = (row * 80 + col) * 2;
-        core::ptr::write_volatile(vga.add(off), byte);
-        core::ptr::write_volatile(vga.add(off + 1), attr);
-        col += 1;
-    }
+    write_ascii_at_vga(s, row, start_col, attr);
 }
 
-/// Записывает строку RTL в VGA, начиная с (row, end_col) и двигаясь влево.
+/// Записывает строку RTL в framebuffer, начиная с (row, end_col) и двигаясь влево.
 ///
 /// # Safety
-/// row < 25, end_col < 80. VGA text buffer 0xB8000 identity-mapped.
+/// row < 25, end_col < 80.
 pub unsafe fn write_str_rtl_direct(s: &str, row: usize, end_col: usize, attr: u8) {
     debug_assert!(row < 25, "write_str_rtl_direct: row={} >= 25", row);
     debug_assert!(
@@ -732,9 +716,7 @@ pub unsafe fn write_str_rtl_direct(s: &str, row: usize, end_col: usize, attr: u8
         "write_str_rtl_direct: end_col={} >= 80",
         end_col
     );
-    let numerals = locale_spec(get_locale()).numerals;
-    let vga = 0xB8000 as *mut u8;
-    // Для RTL: собираем символы в буфер, потом рисуем их справа налево
+    // Собираем codepoints в буфер для единого RTL-рендера
     let mut buf = [0u32; 128];
     let mut len = 0usize;
     for c in s.chars() {
@@ -744,28 +726,14 @@ pub unsafe fn write_str_rtl_direct(s: &str, row: usize, end_col: usize, attr: u8
         buf[len] = c as u32;
         len += 1;
     }
-    // Рисуем с конца буфера (визуальный RTL для изолированных форм)
-    let mut col = end_col;
-    let mut i = 0usize;
-    while i < len {
-        let cp = buf[i];
-        let c = map_display_char(char::from_u32(cp).unwrap_or('?'), numerals);
-        let byte = codepoint_to_vga_byte(c);
-        let off = (row * 80 + col) * 2;
-        core::ptr::write_volatile(vga.add(off), byte);
-        core::ptr::write_volatile(vga.add(off + 1), attr);
-        if col == 0 {
-            break;
-        }
-        col -= 1;
-        i += 1;
-    }
+    let numerals = locale_spec(get_locale()).numerals;
+    write_codepoints_rtl_direct(&buf[..len], row, end_col, attr, numerals);
 }
 
 /// Рисует кодпоинты LTR начиная с (row, start_col).
 ///
 /// # Safety
-/// row < 25, start_col ≤ 80. VGA text buffer 0xB8000 identity-mapped.
+/// row/start_col должны указывать в видимую текстовую сетку framebuffer.
 unsafe fn write_codepoints_ltr_direct(
     codepoints: &[u32],
     row: usize,
@@ -773,19 +741,14 @@ unsafe fn write_codepoints_ltr_direct(
     attr: u8,
     numerals: NumeralSystem,
 ) {
-    debug_assert!(row < 25, "write_codepoints_ltr: row={} >= 25", row);
-    // SAFETY: col проверяется `if col >= 80 { break }` перед каждой записью.
-    let vga = 0xB8000 as *mut u8;
+    let max_col = boot_text_left_col() + boot_text_cols();
     let mut col = start_col;
     for &cp in codepoints {
-        if col >= 80 {
+        if col >= max_col {
             break;
         }
         let mapped = map_display_char(char::from_u32(cp).unwrap_or('?'), numerals);
-        let byte = codepoint_to_vga_byte(mapped);
-        let off = (row * 80 + col) * 2;
-        core::ptr::write_volatile(vga.add(off), byte);
-        core::ptr::write_volatile(vga.add(off + 1), attr);
+        crate::fb_buffer::write_codepoint_at(col, row, mapped as u32, attr);
         col += 1;
     }
 }
@@ -793,7 +756,7 @@ unsafe fn write_codepoints_ltr_direct(
 /// Рисует кодпоинты RTL начиная с (row, end_col) и двигаясь влево.
 ///
 /// # Safety
-/// row < 25, end_col < 80. VGA text buffer 0xB8000 identity-mapped.
+/// row/end_col должны указывать в видимую текстовую сетку framebuffer.
 unsafe fn write_codepoints_rtl_direct(
     codepoints: &[u32],
     row: usize,
@@ -801,16 +764,10 @@ unsafe fn write_codepoints_rtl_direct(
     attr: u8,
     numerals: NumeralSystem,
 ) {
-    debug_assert!(row < 25, "write_codepoints_rtl: row={} >= 25", row);
-    debug_assert!(
-        end_col < 80,
-        "write_codepoints_rtl: end_col={} >= 80",
-        end_col
-    );
     // SAFETY: col уменьшается с `if col == 0 { return }` — не выходит за 0.
     // Числа (ASCII 0-9, '.', ',') пишутся в обратном порядке, чтобы отображаться
     // слева направо внутри RTL-строки (BiDi: weak LTR run в RTL-контексте).
-    let vga = 0xB8000 as *mut u8;
+    let min_col = boot_text_left_col();
     let mut col = end_col;
     let n = codepoints.len();
     let mut i = 0usize;
@@ -836,22 +793,16 @@ unsafe fn write_codepoints_rtl_direct(
                 k -= 1;
                 let mapped =
                     map_display_char(char::from_u32(codepoints[k]).unwrap_or('?'), numerals);
-                let byte = codepoint_to_vga_byte(mapped);
-                let off = (row * 80 + col) * 2;
-                core::ptr::write_volatile(vga.add(off), byte);
-                core::ptr::write_volatile(vga.add(off + 1), attr);
-                if col == 0 {
+                crate::fb_buffer::write_codepoint_at(col, row, mapped as u32, attr);
+                if col <= min_col {
                     return;
                 }
                 col -= 1;
             }
         } else {
             let mapped = map_display_char(char::from_u32(cp).unwrap_or('?'), numerals);
-            let byte = codepoint_to_vga_byte(mapped);
-            let off = (row * 80 + col) * 2;
-            core::ptr::write_volatile(vga.add(off), byte);
-            core::ptr::write_volatile(vga.add(off + 1), attr);
-            if col == 0 {
+            crate::fb_buffer::write_codepoint_at(col, row, mapped as u32, attr);
+            if col <= min_col {
                 return;
             }
             col -= 1;
@@ -874,10 +825,10 @@ unsafe fn codepoint_to_vga_byte(c: char) -> u8 {
 // ПУБЛИЧНЫЙ API ДЛЯ LIB.RS
 // ============================================================
 
-/// Отображает строку статуса локали в правом верхнем углу VGA (колонки 72-79).
+/// Отображает строку статуса локали в правом верхнем углу экрана (колонки 72-79).
 /// Формат: "[RU|LORE]" — 9 символов, row 0, col 72..80.
 ///
-/// Вызывать после инициализации VGA text mode.
+/// Пишет через framebuffer в правый верхний угол текстовой сетки.
 pub fn draw_locale_badge() {
     let locale = get_locale();
     let mode = get_mode();
@@ -899,46 +850,25 @@ pub fn draw_locale_badge() {
     };
     let attr_mode: u8 = 0x8F; // White on DarkGray
 
-    // SAFETY: пишем в row 0, col 72..80. offset = (0*80 + col)*2 < 160 << 8000.
-    // VGA text buffer 0xB8000 identity-mapped загрузчиком.
-    unsafe {
-        let vga = 0xB8000 as *mut u8;
-        // Колонка 72: "["
-        let base = 72 * 2;
-        core::ptr::write_volatile(vga.add(base), b'[');
-        core::ptr::write_volatile(vga.add(base + 1), attr_loc);
-        // Локаль (2 байта)
-        for (i, &b) in loc_badge.iter().enumerate() {
-            let off = (72 + 1 + i) * 2;
-            core::ptr::write_volatile(vga.add(off), b);
-            core::ptr::write_volatile(vga.add(off + 1), attr_loc);
-        }
-        // "|"
-        let off = (72 + 3) * 2;
-        core::ptr::write_volatile(vga.add(off), b'|');
-        core::ptr::write_volatile(vga.add(off + 1), attr_mode);
-        // Режим (4 байта)
-        for (i, &b) in mode_badge.iter().enumerate() {
-            let off = (72 + 4 + i) * 2;
-            core::ptr::write_volatile(vga.add(off), b);
-            core::ptr::write_volatile(vga.add(off + 1), attr_mode);
-        }
-        // "]"
-        let off = (72 + 8) * 2;
-        core::ptr::write_volatile(vga.add(off), b']');
-        core::ptr::write_volatile(vga.add(off + 1), attr_mode);
+    crate::fb_buffer::write_codepoint_at(72, 0, b'[' as u32, attr_loc);
+    for (i, &b) in loc_badge.iter().enumerate() {
+        crate::fb_buffer::write_codepoint_at(73 + i, 0, b as u32, attr_loc);
     }
+    crate::fb_buffer::write_codepoint_at(75, 0, b'|' as u32, attr_mode);
+    for (i, &b) in mode_badge.iter().enumerate() {
+        crate::fb_buffer::write_codepoint_at(76 + i, 0, b as u32, attr_mode);
+    }
+    crate::fb_buffer::write_codepoint_at(80, 0, b']' as u32, attr_mode);
 }
 
 // ============================================================
-// HEX DUMP — прямая запись hex-значений в VGA (для panic/page-fault)
+// HEX DUMP — прямая запись hex-значений в framebuffer (для panic/page-fault)
 // ============================================================
 
-/// Выводит hex u64 (16 символов) в строку VGA без аллокаций.
+/// Выводит hex u64 (16 символов) в строку без аллокаций.
 ///
 /// # Safety
 /// Вызывается из обработчиков исключений — без блокировок, без аллокаций.
-/// VGA text buffer 0xB8000 identity-mapped загрузчиком.
 /// row < 25 и start_col + 15 < 80 — обязанность вызывающего.
 pub unsafe fn write_hex_at_vga(val: u64, row: usize, start_col: usize, attr: u8) {
     debug_assert!(row < 25, "write_hex_at_vga: row={} >= 25", row);
@@ -947,20 +877,15 @@ pub unsafe fn write_hex_at_vga(val: u64, row: usize, start_col: usize, attr: u8)
         "write_hex_at_vga: start_col={} overflows line",
         start_col
     );
-    // SAFETY: offset = (row*80 + col)*2, row<25 col<80 → offset < 8000 < VGA text buffer size.
-    let vga = 0xB8000 as *mut u8;
     let hex = b"0123456789ABCDEF";
-    let mut col = start_col + 15;
     let mut v = val;
-    for _ in 0..16 {
-        let off = (row * 80 + col) * 2;
-        core::ptr::write_volatile(vga.add(off), hex[(v & 0xF) as usize]);
-        core::ptr::write_volatile(vga.add(off + 1), attr);
+    let mut nibbles = [0u8; 16];
+    for i in (0..16).rev() {
+        nibbles[i] = hex[(v & 0xF) as usize];
         v >>= 4;
-        if col == 0 {
-            break;
-        }
-        col -= 1;
+    }
+    for (i, &ch) in nibbles.iter().enumerate() {
+        crate::fb_buffer::write_codepoint_at(start_col + i, row, ch as u32, attr);
     }
 }
 
@@ -975,43 +900,33 @@ pub unsafe fn write_hex32_at_vga(val: u32, row: usize, start_col: usize, attr: u
         "write_hex32_at_vga: start_col={} overflows line",
         start_col
     );
-    // SAFETY: offset = (row*80 + col)*2, row<25 col<80 → offset < 8000.
-    let vga = 0xB8000 as *mut u8;
     let hex = b"0123456789ABCDEF";
-    let mut col = start_col + 7;
     let mut v = val;
-    for _ in 0..8 {
-        let off = (row * 80 + col) * 2;
-        core::ptr::write_volatile(vga.add(off), hex[(v & 0xF) as usize]);
-        core::ptr::write_volatile(vga.add(off + 1), attr);
+    let mut nibbles = [0u8; 8];
+    for i in (0..8).rev() {
+        nibbles[i] = hex[(v & 0xF) as usize];
         v >>= 4;
-        if col == 0 {
-            break;
-        }
-        col -= 1;
+    }
+    for (i, &ch) in nibbles.iter().enumerate() {
+        crate::fb_buffer::write_codepoint_at(start_col + i, row, ch as u32, attr);
     }
 }
 
 /// Выводит «Сектор памяти: 0x<addr>» на строке 12 экрана аварии.
 ///
 /// # Safety
-/// Только из обработчиков исключений. VGA 0xB8000 identity-mapped.
+/// Только из обработчиков исключений.
 pub unsafe fn write_crash_address(addr: u64) {
     const ATTR_TEXT: u8 = 0x0F; // Bright White on Black
     const ATTR_LORE: u8 = 0x0D; // Bright Magenta on Black
-    write_crash_text_at_vga(
-        "\u{0410}\u{0434}\u{0440}\u{0435}\u{0441} / Address: 0x",
-        12,
-        2,
-        ATTR_TEXT,
-    );
+    write_ascii_at_vga("Address: 0x", 12, 2, ATTR_TEXT);
     write_hex_at_vga(addr, 12, 22, ATTR_LORE);
 }
 
 /// Выводит регистры (RIP, RSP, RFLAGS) на строках 15-17 экрана аварии.
 ///
 /// # Safety
-/// Только из обработчиков исключений. VGA 0xB8000 identity-mapped.
+/// Только из обработчиков исключений.
 pub unsafe fn write_registers(rip: u64, rsp: u64, flags: u64) {
     const ATTR_LABEL: u8 = 0x07; // Light Gray on Black
     const ATTR_VALUE: u8 = 0x0D; // Bright Magenta on Black
@@ -1029,8 +944,8 @@ pub unsafe fn write_registers(rip: u64, rsp: u64, flags: u64) {
 /// Выводит текст паники (truncated до 72 символов) на строке 14.
 ///
 /// # Safety
-/// Только из panic handler. VGA 0xB8000 identity-mapped.
+/// Только из panic handler.
 pub unsafe fn write_panic_message(msg: &str) {
     const ATTR_MSG: u8 = 0x0C; // Light Red on Black
-    write_str_at_vga(msg, 14, 2, ATTR_MSG);
+    write_ascii_at_vga(msg, 14, 2, ATTR_MSG);
 }

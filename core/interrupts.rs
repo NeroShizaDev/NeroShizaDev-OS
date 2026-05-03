@@ -113,9 +113,8 @@ extern "x86-interrupt" fn page_fault_handler(
         _stack_frame.cpu_flags.bits()
     );
     crate::serial_println!("=====================================");
-    // SAFETY: page fault handler — прерывания отключены, мьютексы нельзя использовать.
-    // render_panic_screen и write_*_at_vga обращаются к VGA напрямую без блокировок.
-    // Это единственный безопасный способ вывода информации в момент page fault.
+    // В режиме framebuffer locale-функции сами маршрутизируют в fb_buffer без mutex.
+    // render_panic_screen возвращается рано если fb активен, исключая рекурсию фолтов.
     unsafe {
         crate::locale::render_panic_screen(KernelEvent::PageFault);
         crate::locale::write_str_at_vga("CR2=0x", 8, 2, 0x0F);
@@ -151,6 +150,8 @@ extern "x86-interrupt" fn general_protection_fault_handler(
     crate::serial_println!("Сегмент кода:         {:#x}", _stack_frame.code_segment.0);
     crate::serial_println!("Флаги CPU:            {:#x}", _stack_frame.cpu_flags.bits());
     crate::serial_println!("=======================================");
+    // В режиме framebuffer locale-функции маршрутизируют в fb_buffer без mutex.
+    // render_panic_screen возвращается рано если fb активен, исключая рекурсию фолтов.
     unsafe {
         let ip = _stack_frame.instruction_pointer.as_u64();
         crate::locale::render_panic_screen(crate::kernel_messages::KernelEvent::GeneralProtection);
@@ -236,38 +237,38 @@ extern "x86-interrupt" fn double_fault_handler(
     }
     serial_str("==================================\r\n");
 
-    // Прямая запись в VGA 0xB8000 — NO locale/mutex/println — только raw ptr.
-    // Здесь рисуем безопасную рамку (frame), чтобы сохранить ожидаемый вид crash-screen.
+    // В double fault нельзя трогать Mutex/println, но write_char_at не берёт lock.
     #[inline(always)]
-    fn vga_put(row: usize, col: usize, ch: u8, attr: u8) {
-        let vga = 0xB8000 as *mut u16;
-        unsafe {
-            core::ptr::write_volatile(vga.add(row * 80 + col), ((attr as u16) << 8) | ch as u16);
-        }
+    fn screen_put(row: usize, col: usize, ch: u8, attr: u8) {
+        crate::fb_buffer::write_char_at(col, row, ch, attr);
     }
     #[inline(always)]
-    fn vga_write(row: usize, col: usize, s: &str, attr: u8) {
-        let mut c = col;
+    fn screen_write(row: usize, col: usize, s: &str, attr: u8) {
+        let mut current_col = col;
         for &b in s.as_bytes() {
-            if c >= 80 {
+            if current_col >= 80 {
                 break;
             }
-            vga_put(row, c, b, attr);
-            c += 1;
+            screen_put(row, current_col, b, attr);
+            current_col += 1;
         }
     }
-    fn vga_hex64(row: usize, col: usize, mut v: u64, attr: u8) {
+    fn screen_hex64(row: usize, col: usize, mut value: u64, attr: u8) {
         let mut buf = [0u8; 16];
         for i in (0..16).rev() {
-            let d = (v & 0xF) as u8;
-            buf[i] = if d < 10 { b'0' + d } else { b'a' + d - 10 };
-            v >>= 4;
+            let digit = (value & 0xF) as u8;
+            buf[i] = if digit < 10 {
+                b'0' + digit
+            } else {
+                b'a' + digit - 10
+            };
+            value >>= 4;
         }
         for (i, &b) in buf.iter().enumerate() {
             if col + i >= 80 {
                 break;
             }
-            vga_put(row, col + i, b, attr);
+            screen_put(row, col + i, b, attr);
         }
     }
 
@@ -275,52 +276,52 @@ extern "x86-interrupt" fn double_fault_handler(
     const ATTR_FRAME: u8 = 0xDF; // white on magenta
     const ATTR_HI: u8 = 0x0D; // bright magenta on black
 
-    // Clear screen
-    for row in 0..25 {
+    if crate::fb_buffer::is_initialized() {
+        for row in 0..25 {
+            for col in 0..80 {
+                screen_put(row, col, b' ', ATTR_BG);
+            }
+        }
         for col in 0..80 {
-            vga_put(row, col, b' ', ATTR_BG);
+            screen_put(0, col, b'=', ATTR_FRAME);
+            screen_put(24, col, b'=', ATTR_FRAME);
         }
-    }
-    // Frame
-    for col in 0..80 {
-        vga_put(0, col, b'=', ATTR_FRAME);
-        vga_put(24, col, b'=', ATTR_FRAME);
-    }
-    for row in 1..24 {
-        vga_put(row, 0, b'|', ATTR_FRAME);
-        vga_put(row, 79, b'|', ATTR_FRAME);
-    }
+        for row in 1..24 {
+            screen_put(row, 0, b'|', ATTR_FRAME);
+            screen_put(row, 79, b'|', ATTR_FRAME);
+        }
 
-    vga_write(0, 22, "NeroShizaOS KERNEL EVENT", ATTR_FRAME);
-    vga_write(2, 3, "DF   [SAFE DOUBLE FAULT SCREEN]", ATTR_BG);
-    vga_write(4, 3, "DOUBLE FAULT. System halted.", ATTR_HI);
+        screen_write(0, 22, "NeroShizaOS KERNEL EVENT", ATTR_FRAME);
+        screen_write(2, 3, "DF   [SAFE DOUBLE FAULT SCREEN]", ATTR_BG);
+        screen_write(4, 3, "DOUBLE FAULT. System halted.", ATTR_HI);
 
-    vga_write(7, 3, "RIP: 0x", ATTR_BG);
-    vga_hex64(7, 10, _stack_frame.instruction_pointer.as_u64(), ATTR_HI);
-    vga_write(8, 3, "RSP: 0x", ATTR_BG);
-    vga_hex64(8, 10, _stack_frame.stack_pointer.as_u64(), ATTR_HI);
-    vga_write(9, 3, "FLG: 0x", ATTR_BG);
-    vga_hex64(9, 10, _stack_frame.cpu_flags.bits(), ATTR_HI);
+        screen_write(7, 3, "RIP: 0x", ATTR_BG);
+        screen_hex64(7, 10, _stack_frame.instruction_pointer.as_u64(), ATTR_HI);
+        screen_write(8, 3, "RSP: 0x", ATTR_BG);
+        screen_hex64(8, 10, _stack_frame.stack_pointer.as_u64(), ATTR_HI);
+        screen_write(9, 3, "FLG: 0x", ATTR_BG);
+        screen_hex64(9, 10, _stack_frame.cpu_flags.bits(), ATTR_HI);
 
-    vga_write(11, 3, "Last actions:", ATTR_BG);
-    let mut row = 12usize;
-    if trace_len == 0 {
-        vga_write(row, 5, "- (none)", ATTR_HI);
-    } else {
-        let first = trace_len.saturating_sub(6);
-        for i in first..trace_len {
-            if row >= 23 {
-                break;
-            }
-            if let Some(entry) = crate::trace::get_recent(i) {
-                vga_write(row, 5, "- ", ATTR_BG);
-                vga_write(row, 7, entry, ATTR_BG);
-                row += 1;
+        screen_write(11, 3, "Last actions:", ATTR_BG);
+        let mut row = 12usize;
+        if trace_len == 0 {
+            screen_write(row, 5, "- (none)", ATTR_HI);
+        } else {
+            let first = trace_len.saturating_sub(6);
+            for i in first..trace_len {
+                if row >= 23 {
+                    break;
+                }
+                if let Some(entry) = crate::trace::get_recent(i) {
+                    screen_write(row, 5, "- ", ATTR_BG);
+                    screen_write(row, 7, entry, ATTR_BG);
+                    row += 1;
+                }
             }
         }
-    }
 
-    vga_write(23, 20, "System halted. Check serial.log", ATTR_BG);
+        screen_write(23, 20, "System halted. Check serial.log", ATTR_BG);
+    }
 
     // Единственный выход — halt навсегда. БЕЗ render_panic_screen!
     // (render_panic_screen → spin::Mutex → triple fault → reboot loop)
@@ -335,15 +336,15 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     let _irq_scope = crate::irq_guard::enter_irq();
-    use pc_keyboard::{DecodedKey, HandleControl, Keyboard, ScancodeSet1, layouts};
+    use pc_keyboard::{DecodedKey, HandleControl, ScancodeSet1};
     use spin::Mutex;
 
     lazy_static! {
-        // ТИП: Keyboard<Layout, Set>
-        static ref KEYBOARD: Mutex<Keyboard<layouts::Us104Key, ScancodeSet1>> =
-            Mutex::new(Keyboard::new(
+        // ТИП: PS2Keyboard<Layout, Set>
+        static ref KEYBOARD: Mutex<pc_keyboard::PS2Keyboard<pc_keyboard::layouts::Us104Key, ScancodeSet1>> =
+            Mutex::new(pc_keyboard::PS2Keyboard::new(
                 ScancodeSet1::new(),    // Аргумент 1: S (Set)
-                layouts::Us104Key,      // Аргумент 2: L (Layout)
+                pc_keyboard::layouts::Us104Key, // Аргумент 2: L (Layout)
                 HandleControl::Ignore
             ));
     }

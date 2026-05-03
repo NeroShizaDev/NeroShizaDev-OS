@@ -72,12 +72,12 @@ pub fn probe_vga() -> bool {
 /// Выводит результат опроса PS/2 контроллера.
 pub fn display_ps2_probe() {
     if probe_ps2() {
-        crate::locale::print_boot_status(crate::user_messages::current(
-            crate::user_messages::UiText::ValidatorPs2Ok,
+        crate::locale::print_boot_status(crate::kernel_messages::current(
+            crate::kernel_messages::UiText::ValidatorPs2Ok,
         ));
     } else {
         crate::locale::print_localized_line(
-            crate::user_messages::current(crate::user_messages::UiText::ValidatorPs2NoResp),
+            crate::kernel_messages::current(crate::kernel_messages::UiText::ValidatorPs2NoResp),
             0x0E,
         );
     }
@@ -126,7 +126,7 @@ impl PreFreezeRiskReport {
 pub fn probe_pre_freeze_risks() -> PreFreezeRiskReport {
     let cmos = probe_cmos();
     let irq_viol = crate::irq_guard::violation_count();
-    let thermal = crate::rtc::probe_thermal();
+    let thermal = crate::apps::rtc::probe_thermal();
 
     let mut score = 0u8;
 
@@ -167,16 +167,38 @@ pub fn probe_pre_freeze_risks() -> PreFreezeRiskReport {
 }
 
 pub fn display_pre_freeze_risks(report: &PreFreezeRiskReport) {
-    crate::locale::print_localized_fmt(
-        0x0E,
-        format_args!(
-            "[HEALTH] pre-freeze risk={} score={} cmos_valid={} irq_hits={}",
-            report.level(),
-            report.risk_score,
-            report.cmos_time_valid,
-            report.irq_guard_violations,
+    match crate::locale::get_locale() {
+        crate::kernel_messages::Locale::RuRu => crate::locale::print_localized_fmt(
+            0x0E,
+            format_args!(
+                "[HEALTH] Риск зависания={} балл={} CMOS={} IRQ={}",
+                report.level(),
+                report.risk_score,
+                if report.cmos_time_valid { "OK" } else { "NO" },
+                report.irq_guard_violations,
+            ),
         ),
-    );
+        crate::kernel_messages::Locale::EnUs => crate::locale::print_localized_fmt(
+            0x0E,
+            format_args!(
+                "[HEALTH] Freeze risk={} score={} CMOS={} IRQ={}",
+                report.level(),
+                report.risk_score,
+                if report.cmos_time_valid { "OK" } else { "NO" },
+                report.irq_guard_violations,
+            ),
+        ),
+        crate::kernel_messages::Locale::ArEg => crate::locale::print_localized_fmt(
+            0x0E,
+            format_args!(
+                "[HEALTH] خطر التجمّد={} الدرجة={} CMOS={} IRQ={}",
+                report.level(),
+                report.risk_score,
+                if report.cmos_time_valid { "OK" } else { "NO" },
+                report.irq_guard_violations,
+            ),
+        ),
+    }
 
     if report.rtc_uip_stuck {
         handle_hw_error(
@@ -367,7 +389,7 @@ pub fn probe_cmos() -> CmosReport {
 pub fn display_cmos_probe(report: &CmosReport) {
     if !report.chip_alive {
         crate::locale::print_localized_line(
-            crate::user_messages::current(crate::user_messages::UiText::ValidatorCmosDead),
+            crate::kernel_messages::current(crate::kernel_messages::UiText::ValidatorCmosDead),
             0x0C,
         );
         return;
@@ -382,7 +404,7 @@ pub fn display_cmos_probe(report: &CmosReport) {
     } else {
         "UIP завис — чип завис?"
     };
-    crate::user_messages::print_validator_cmos(report.status_a, bat_str, rtc_str);
+    crate::kernel_messages::print_validator_cmos(report.status_a, bat_str, rtc_str);
 }
 
 // ============================================================
@@ -408,16 +430,16 @@ pub fn handle_hw_error(level: ErrorLevel, msg: &str) {
         ErrorLevel::Recoverable => {
             crate::serial_println!("[VALIDATOR][WARN] {}", msg);
             // Минимальная VGA-строка: основной разбор идёт через serial.log.
-            crate::user_messages::print_validator_warn(msg);
+            crate::kernel_messages::print_validator_warn(msg);
         }
         ErrorLevel::ExitToShell => {
             crate::serial_println!("[VALIDATOR][ERR] return to shell: {}", msg);
-            crate::user_messages::print_validator_err(msg);
+            crate::kernel_messages::print_validator_err(msg);
         }
         ErrorLevel::Fatal => {
             crate::serial_println!("[VALIDATOR][FATAL] {}", msg);
             crate::serial_println!("[VALIDATOR][FATAL] hard reboot disabled; system will halt");
-            crate::user_messages::print_validator_fatal(msg);
+            crate::kernel_messages::print_validator_fatal(msg);
             x86_64::instructions::interrupts::disable();
             loop {
                 x86_64::instructions::hlt();

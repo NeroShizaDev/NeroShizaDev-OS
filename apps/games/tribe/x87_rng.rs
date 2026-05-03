@@ -91,7 +91,7 @@ impl X87Rng {
 fn ensure_x87_ready() {
     unsafe {
         if !X87_READY {
-            crate::fpu::init();
+            crate::apps::fpu::init();
             X87_READY = true;
         }
     }

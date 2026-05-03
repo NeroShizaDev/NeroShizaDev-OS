@@ -98,7 +98,7 @@ pub unsafe fn play_hex_note(note: u8, octave_shift: i8) {
 /// Каждая нота звучит ~80мс (примерная задержка через busy loop).
 pub fn demo_hex_scale() {
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::BeeperStart),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::BeeperStart),
         0x0E,
     );
     for i in 0..16u8 {
@@ -112,7 +112,7 @@ pub fn demo_hex_scale() {
     unsafe { stop() };
     crate::locale::print_localized_line("", 0x0E);
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::BeeperDone),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::BeeperDone),
         0x0A,
     );
 }

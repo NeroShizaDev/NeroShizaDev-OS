@@ -8,9 +8,19 @@ unsafe fn cmos_read(reg: u8) -> u8 {
     crate::validator::cmos_read(reg)
 }
 
-/// Ждём пока RTC не обновляется (бит 7 регистра 0x0A)
+/// Ждём пока RTC не обновляется (бит 7 регистра 0x0A).
+/// На современном железе (Alder Lake + мёртвая CMOS-батарейка) UIP может
+/// зависнуть навсегда — ограничиваем 100 000 итераций (~100 мс).
 unsafe fn wait_rtc_ready() {
-    while crate::validator::cmos_probe_reg(0x0A) & 0x80 != 0 {}
+    let mut retries: u32 = 0;
+    while crate::validator::cmos_probe_reg(0x0A) & 0x80 != 0 {
+        retries += 1;
+        if retries >= 100_000 {
+            crate::serial_println!("[RTC] wait_rtc_ready: timeout (UIP stuck), proceeding anyway");
+            break;
+        }
+        core::hint::spin_loop();
+    }
 }
 
 /// Конвертирует BCD в обычное число
@@ -101,7 +111,7 @@ pub fn display_status() {
     // Шаг 2: читаем время только если данные достоверны
     if !report.chip_alive {
         crate::locale::print_localized_line(
-            crate::user_messages::current(crate::user_messages::UiText::RtcNoChip),
+            crate::kernel_messages::current(crate::kernel_messages::UiText::RtcNoChip),
             0x0C,
         );
         return;
@@ -109,7 +119,7 @@ pub fn display_status() {
 
     if !report.battery_ok {
         crate::locale::print_localized_line(
-            crate::user_messages::current(crate::user_messages::UiText::RtcDeadBattery),
+            crate::kernel_messages::current(crate::kernel_messages::UiText::RtcDeadBattery),
             0x0C,
         );
         // Всё равно показываем время — но с предупреждением
@@ -117,7 +127,7 @@ pub fn display_status() {
 
     if !report.rtc_ready {
         crate::locale::print_localized_line(
-            crate::user_messages::current(crate::user_messages::UiText::RtcUipStuck),
+            crate::kernel_messages::current(crate::kernel_messages::UiText::RtcUipStuck),
             0x0C,
         );
         return;
@@ -136,7 +146,7 @@ pub fn display_status() {
         return;
     }
 
-    crate::user_messages::print_rtc_line(
+    crate::kernel_messages::print_rtc_line(
         dt.hours, dt.minutes, dt.seconds, dt.day, dt.month, dt.year,
     );
 }
@@ -229,13 +239,23 @@ pub fn probe_thermal() -> Option<ThermalProbe> {
 
 pub fn display_thermal() {
     let Some(probe) = probe_thermal() else {
-        crate::locale::print_localized_line("[TEMP] IA32_THERM_STATUS unsupported", 0x0C);
+        match crate::locale::get_locale() {
+            crate::kernel_messages::Locale::RuRu => {
+                crate::locale::print_localized_line("[TEMP] Термодатчик CPU недоступен", 0x0C)
+            }
+            crate::kernel_messages::Locale::EnUs => {
+                crate::locale::print_localized_line("[TEMP] CPU thermal sensor unavailable", 0x0C)
+            }
+            crate::kernel_messages::Locale::ArEg => {
+                crate::locale::print_localized_line("[TEMP] حساس حرارة المعالج غير متاح", 0x0C)
+            }
+        }
         return;
     };
 
     if probe.throttle_logged {
-        crate::user_messages::print_rtc_throttle(probe.estimated_temp_c, probe.margin_c_to_tjmax);
+        crate::kernel_messages::print_rtc_throttle(probe.estimated_temp_c, probe.margin_c_to_tjmax);
     } else {
-        crate::user_messages::print_rtc_temp(probe.estimated_temp_c, probe.margin_c_to_tjmax);
+        crate::kernel_messages::print_rtc_temp(probe.estimated_temp_c, probe.margin_c_to_tjmax);
     }
 }

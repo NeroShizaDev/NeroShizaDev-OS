@@ -31,6 +31,10 @@ pub fn on_destroy() {
 }
 
 pub fn run() {
+    if crate::fb_buffer::is_initialized() {
+        crate::serial_println!("[tribe] UEFI/framebuffer mode: VGA text игра недоступна");
+        return;
+    }
     crate::serial_println!("[tribe] run enter");
     game::run();
     crate::serial_println!("[tribe] run exit");

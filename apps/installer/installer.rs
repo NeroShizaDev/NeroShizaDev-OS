@@ -12,7 +12,7 @@
 //   5. Register: запись в AppRegistry
 //   6. Done:     "Installation complete!"
 //
-// TUI-визард рисуется напрямую в VGA 0xB8000 (как launcher).
+// TUI-визард рисуется через fb_buffer.
 //
 // Вызов из shell:
 //   `install` или `install demo` → installer::run(data, label)
@@ -53,17 +53,10 @@ impl InstallResult {
     }
 }
 
-// ── VGA helpers (тот же стиль что launcher) ──────────────────
-
-const VGA: *mut u8 = 0xb8000 as *mut u8;
+// ── TUI helpers ──────────────────────────────────────────────
 
 unsafe fn put(row: usize, col: usize, ch: u8, color: u8) {
-    if row >= 25 || col >= 80 {
-        return;
-    }
-    let off = (row * 80 + col) * 2;
-    core::ptr::write_volatile(VGA.add(off), ch);
-    core::ptr::write_volatile(VGA.add(off + 1), color);
+    crate::fb_buffer::write_char_at(col, row, ch, color);
 }
 
 unsafe fn fill_seg(row: usize, col: usize, len: usize, color: u8) {
@@ -536,7 +529,21 @@ unsafe fn field_row(row: usize, label: &[u8], value: &[u8]) {
 
 // ── Input ────────────────────────────────────────────────────
 
+/// Сбрасывает "хвост" клавиатурного буфера, чтобы Enter из shell/предыдущего
+/// шага не автоподтверждал следующий экран установщика.
+fn flush_stale_input() {
+    unsafe {
+        for _ in 0..256usize {
+            if !crate::ps2::has_scancode() {
+                break;
+            }
+            let _ = crate::ps2::read_scancode();
+        }
+    }
+}
+
 fn wait_key() {
+    flush_stale_input();
     unsafe {
         loop {
             if crate::ps2::has_scancode() {
@@ -552,6 +559,7 @@ fn wait_key() {
 
 /// Ждёт Enter (true) или Esc (false).
 fn wait_confirm() -> bool {
+    flush_stale_input();
     unsafe {
         loop {
             if crate::ps2::has_scancode() {

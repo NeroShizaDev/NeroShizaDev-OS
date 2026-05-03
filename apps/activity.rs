@@ -214,41 +214,41 @@ fn dispatch_update(kind: AppKind, depth: usize) -> ActivityIntent {
             ActivityIntent::Pop
         }
         AppKind::Menger => {
-            crate::menger::run_demo();
+            crate::apps::menger::run_demo();
             ActivityIntent::Pop
         }
         AppKind::Voodoo => {
-            crate::vga_buffer::clear_screen();
-            crate::voodoo_math::demo_cellular_automaton();
+            crate::fb_buffer::clear_screen();
+            crate::voodoo_engine::demo_cellular_automaton();
             wait_key();
             ActivityIntent::Pop
         }
         AppKind::Chronos => {
-            crate::vga_buffer::clear_screen();
-            crate::chronos::display_triple_time();
+            crate::fb_buffer::clear_screen();
+            crate::apps::chronos::display_triple_time();
             wait_key();
             ActivityIntent::Pop
         }
         AppKind::Rtc => {
-            crate::vga_buffer::clear_screen();
-            crate::rtc::display_status();
+            crate::fb_buffer::clear_screen();
+            crate::apps::rtc::display_status();
             wait_key();
             ActivityIntent::Pop
         }
         AppKind::Rng => {
-            crate::vga_buffer::clear_screen();
-            crate::rng::demo();
+            crate::fb_buffer::clear_screen();
+            crate::apps::rng::demo();
             wait_key();
             ActivityIntent::Pop
         }
         AppKind::Beeper => {
-            crate::vga_buffer::clear_screen();
-            crate::beeper::demo_hex_scale();
+            crate::fb_buffer::clear_screen();
+            crate::apps::beeper::demo_hex_scale();
             wait_key();
             ActivityIntent::Pop
         }
         AppKind::Fpu => {
-            crate::fpu::demo();
+            crate::apps::fpu::demo();
             ActivityIntent::Pop
         }
         AppKind::Locale => crate::apps::locale_switcher::update(depth),
@@ -317,7 +317,7 @@ pub fn run_activity_manager() {
     }
 
     // Back in shell territory
-    crate::vga_buffer::clear_screen();
+    crate::fb_buffer::clear_screen();
     crate::locale::draw_locale_badge();
 }
 

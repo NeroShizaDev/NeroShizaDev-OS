@@ -80,7 +80,7 @@ pub fn run_slot(slot: usize) -> RunResult {
     let manifest = header::parse_manifest(data, hdr.manifest_offset);
 
     // Очищаем экран и выводим баннер
-    crate::vga_buffer::clear_screen();
+    crate::fb_buffer::clear_screen();
     crate::println!("╔══════════════════════════════════════════════════╗");
     if let Some(ref m) = manifest {
         let ne = m.app_name.iter().position(|&b| b == 0).unwrap_or(32);

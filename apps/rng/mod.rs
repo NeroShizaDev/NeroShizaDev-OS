@@ -63,36 +63,36 @@ pub fn random_range(max: u64) -> u64 {
 /// Демо: показывает случайные числа
 pub fn demo() {
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::RngHeader),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::RngHeader),
         0x0E,
     );
 
     if !is_supported() {
         crate::locale::print_localized_line(
-            crate::user_messages::current(crate::user_messages::UiText::RngNotSupported),
+            crate::kernel_messages::current(crate::kernel_messages::UiText::RngNotSupported),
             0x0C,
         );
         return;
     }
 
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::RngSupported),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::RngSupported),
         0x0A,
     );
 
     for i in 0..4 {
         match random_u64() {
-            Some(val) => crate::user_messages::print_rng_value(i, val),
-            None => crate::user_messages::print_rng_error(i),
+            Some(val) => crate::kernel_messages::print_rng_value(i, val),
+            None => crate::kernel_messages::print_rng_error(i),
         }
     }
 
     // Бросаем кубик
     let dice = random_range(6) + 1;
-    crate::user_messages::print_rng_dice(dice);
+    crate::kernel_messages::print_rng_dice(dice);
 
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::RngDone),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::RngDone),
         0x0A,
     );
 }

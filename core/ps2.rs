@@ -257,6 +257,39 @@ pub unsafe fn read_scancode() -> u8 {
     sc
 }
 
+/// Инициализирует PS/2 контроллер: дренирует буфер и разрешает сканирование клавиатуры.
+///
+/// QEMU включает сканирование по умолчанию, VirtualBox оставляет PS/2 порт
+/// в отключённом состоянии после BIOS (команда 0xAD без последующего 0xAE).
+/// Явная команда 0xAE (Enable First PS/2 Port) исправляет ввод в VirtualBox.
+///
+/// # Safety
+/// Прямой доступ к I/O-портам 0x60/0x64. Вызывать до x86_64::instructions::interrupts::enable().
+pub unsafe fn init() {
+    let mut status_port: Port<u8> = Port::new(0x64);
+    let mut data_port: Port<u8> = Port::new(0x60);
+
+    // Дренаж выходного буфера (OBF = bit 0) — убираем мусор от BIOS
+    for _ in 0..16u8 {
+        if status_port.read() & 0x01 == 0 {
+            break;
+        }
+        let _ = data_port.read();
+    }
+
+    // Ждём освобождения входного буфера (IBF = bit 1) перед отправкой команды
+    for _ in 0..0xFFFFu32 {
+        if status_port.read() & 0x02 == 0 {
+            break;
+        }
+    }
+
+    // 0xAE = Enable First PS/2 Port (клавиатура)
+    status_port.write(0xAEu8);
+
+    crate::serial_println!("[PS2][INIT] keyboard scanning enabled (cmd 0xAE)");
+}
+
 /// Ожидает вертикального гашения (VBlank) через VGA Input Status 1 (0x3DA).
 ///
 /// # Safety

@@ -45,8 +45,8 @@ fn lcg_rand(max: u8) -> u8 {
 /// * `brightness` — текущий уровень яркости пикселя (0..FIRE_LEVELS)
 /// * Возвращает скорректированный уровень в пределах [0, FIRE_LEVELS)
 pub fn chaos_lighting(brightness: u8, max_level: u8) -> u8 {
-    let noise: i16 = if crate::rng::is_supported() {
-        match crate::rng::random_u64() {
+    let noise: i16 = if crate::apps::rng::is_supported() {
+        match crate::apps::rng::random_u64() {
             Some(r) => ((r & 0x0F) as i16) - 8, // [-8, +7]
             None => lcg_rand(16) as i16 - 8,
         }
@@ -60,7 +60,7 @@ pub fn chaos_lighting(brightness: u8, max_level: u8) -> u8 {
 
 /// Возвращает случайный bool с заданной вероятностью (prob / 256).
 pub fn random_chance(prob: u8) -> bool {
-    match crate::rng::random_u64() {
+    match crate::apps::rng::random_u64() {
         Some(r) => (r as u8) < prob,
         None => lcg_rand(255) < prob,
     }
@@ -68,7 +68,7 @@ pub fn random_chance(prob: u8) -> bool {
 
 /// Случайный u8 [0, max)
 pub fn rand_u8(max: u8) -> u8 {
-    match crate::rng::random_u64() {
+    match crate::apps::rng::random_u64() {
         Some(r) => (r as u8) % max.max(1),
         None => lcg_rand(max),
     }

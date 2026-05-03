@@ -32,7 +32,7 @@ static mut S_PACKED: [u8; 8 * 1024] = [0u8; 8 * 1024]; // был на стеке
 
 /// Главный вход: принимает сырые байты, печатает отчёт.
 pub fn run_on_slice(data: &[u8], label: &str) {
-    crate::user_messages::print_jackal_header(label, data.len() as u64);
+    crate::kernel_messages::print_jackal_header(label, data.len() as u64);
 
     let report = analyzer::analyze(data);
 
@@ -43,7 +43,7 @@ pub fn run_on_slice(data: &[u8], label: &str) {
     print_classification(&report);
     print_voodoo_bridge(&report);
 
-    crate::user_messages::print_jackal_footer();
+    crate::kernel_messages::print_jackal_footer();
 }
 
 // ============================================================
@@ -55,10 +55,10 @@ fn print_magic(report: &Report) {
         Some(m) => {
             // TECH: «[MAGIC] MZ @0x00 → Executable»
             // LORE: «Первая сигнатура узнана: MZ — это исполняемое тело.»
-            crate::user_messages::print_jackal_magic(m.offset, m.name, m.kind_hint.short());
+            crate::kernel_messages::print_jackal_magic(m.offset, m.name, m.kind_hint.short());
         }
         None => {
-            crate::user_messages::print_jackal_no_magic();
+            crate::kernel_messages::print_jackal_no_magic();
         }
     }
 }
@@ -66,8 +66,8 @@ fn print_magic(report: &Report) {
 fn print_stats(report: &Report) {
     let h_int = report.global_h_milli / 1000;
     let h_frac = report.global_h_milli % 1000;
-    crate::user_messages::print_jackal_entropy(h_int, h_frac);
-    crate::user_messages::print_jackal_histogram_stats(
+    crate::kernel_messages::print_jackal_entropy(h_int, h_frac);
+    crate::kernel_messages::print_jackal_histogram_stats(
         report.unique,
         report.printable_bp,
         report.zero_bp,
@@ -80,7 +80,7 @@ fn print_block_profile(report: &Report) {
     }
     let (mn, mx) = report.profile.range();
     let trans = report.profile.transition_count();
-    crate::user_messages::print_jackal_profile_summary(
+    crate::kernel_messages::print_jackal_profile_summary(
         report.profile.block_count as u32,
         mn,
         mx,
@@ -99,7 +99,7 @@ fn print_block_profile(report: &Report) {
         let idx = (v / 1000).min(7) as usize;
         line[i] = BAR_CHARS[idx];
     }
-    crate::user_messages::print_jackal_sparkline(&line[..shown]);
+    crate::kernel_messages::print_jackal_sparkline(&line[..shown]);
 }
 
 fn print_autocorr(report: &Report) {
@@ -107,7 +107,7 @@ fn print_autocorr(report: &Report) {
     // best_v в basis points 0..10000. Для печати: %.2f = bp/100
     let pct_int = best_v / 100;
     let pct_frac = best_v % 100;
-    crate::user_messages::print_jackal_autocorr_summary(
+    crate::kernel_messages::print_jackal_autocorr_summary(
         best_p as u32,
         pct_int as u32,
         pct_frac as u32,
@@ -116,7 +116,7 @@ fn print_autocorr(report: &Report) {
     // Полная таблица периодов
     for (i, &p) in AUTOCORR_PERIODS.iter().enumerate() {
         let v = report.autocorr.match_bp[i];
-        crate::user_messages::print_jackal_autocorr_row(
+        crate::kernel_messages::print_jackal_autocorr_row(
             p as u32,
             (v / 100) as u32,
             (v % 100) as u32,
@@ -134,7 +134,7 @@ fn print_classification(report: &Report) {
         FileKind::LossyMedia => "LOSSY MEDIA",
         FileKind::Unknown => "UNKNOWN",
     };
-    crate::user_messages::print_jackal_classification(kind_name, report.confidence_milli);
+    crate::kernel_messages::print_jackal_classification(kind_name, report.confidence_milli);
 }
 
 fn print_voodoo_bridge(report: &Report) {
@@ -148,7 +148,7 @@ fn print_voodoo_bridge(report: &Report) {
         (priors[4] * 1000.0) as u32,
         (priors[5] * 1000.0) as u32,
     ];
-    crate::user_messages::print_jackal_voodoo_priors(&milli);
+    crate::kernel_messages::print_jackal_voodoo_priors(&milli);
 }
 
 // ============================================================
@@ -176,7 +176,7 @@ The quick brown fox jumps over the lazy dog. 1234567890\n\
 
 pub fn run_demo() {
     crate::trace::record("jackal demo entered");
-    crate::vga_buffer::clear_screen();
+    crate::fb_buffer::clear_screen();
     crate::locale::print_localized_line("=== JACKAL ANALYZER DEMO ===", 0x0E);
     crate::locale::print_localized_line("Analysing built-in test slice...", 0x07);
 

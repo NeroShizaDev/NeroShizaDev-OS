@@ -47,6 +47,12 @@ pub fn init(wad_data: &'static [u8]) {
 /// заблокированы, PIC EOI ещё не отправлен — используем прямой опрос PS/2
 /// (порт 0x60). VGA-регистры и 0xA0000 должны быть identity-mapped.
 pub fn run() {
+    // Mode 13h требует legacy VGA (0xA0000 identity-mapped).
+    // В UEFI-режиме (fb_buffer активен) legacy VGA недоступен — пропускаем.
+    if crate::fb_buffer::is_initialized() {
+        crate::serial_println!("[DOOM] Пропуск: Mode 13h недоступен в UEFI/framebuffer режиме");
+        return;
+    }
     crate::serial_println!("[DOOM] Запуск");
     unsafe {
         // Сохраняем ВСЕ 256 слотов шрифта plane 2 перед Mode 13h.
@@ -165,17 +171,19 @@ pub fn run() {
 /// Вызывается ActivityManager через lifecycle Destroy после выхода из run().
 /// Выполняет 4 шага Ритуала Восстановления Mode 3 + кириллица + badge.
 pub fn on_destroy() {
-    crate::serial_println!("[DOOM] on_destroy: восстановление текстового режима (4 шага)");
+    if crate::fb_buffer::is_initialized() {
+        // run() вернулся сразу в UEFI-режиме — ничего не запускалось, нечего восстанавливать
+        return;
+    }
+    crate::serial_println!("[DOOM] on_destroy: восстановление текстового режима");
     unsafe {
-        // Шаг 1-4: регистры + DAC-палитра + ASCII 0-127 + очистка 0xB8000
         crate::vga_hw::restore_text_mode();
         // Восстанавливаем ВСЕ 256 слотов шрифта из бэкапа:
         // ASCII 0-127 (наш кастомный), кириллица 128-191, box-drawing 192-255.
         // Без этого символы ╠═╚╝║ (>191) остаются испорченными огнём doom.
         vga_graphics::restore_font_plane();
-        // Восстанавливаем locale badge (флаг локали в правом углу)
-        crate::locale::draw_locale_badge();
     }
+    crate::locale::draw_locale_badge();
     crate::serial_println!("[DOOM] on_destroy завершён");
 }
 

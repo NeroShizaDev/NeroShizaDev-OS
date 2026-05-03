@@ -93,14 +93,14 @@ pub fn display_hex_time() {
     let report = crate::validator::probe_cmos();
     if !report.chip_alive {
         crate::locale::print_localized_line(
-            crate::user_messages::current(crate::user_messages::UiText::ChronosHexNoChip),
+            crate::kernel_messages::current(crate::kernel_messages::UiText::ChronosHexNoChip),
             0x0C,
         );
         return;
     }
     if !report.battery_ok {
         crate::locale::print_localized_line(
-            crate::user_messages::current(crate::user_messages::UiText::ChronosHexDeadBattery),
+            crate::kernel_messages::current(crate::kernel_messages::UiText::ChronosHexDeadBattery),
             0x0C,
         );
     }
@@ -244,7 +244,7 @@ fn radical_name(val10000: i64) -> &'static str {
 
 /// Выводит тригонометрические часы
 pub fn display_trig_clock() {
-    let dt = crate::rtc::read_moscow_time();
+    let dt = crate::apps::rtc::read_moscow_time();
 
     // Угол: α = 90° - 30° * (hours % 12) - 0.5° * minutes
     // В единицах deg*100:  α = 9000 - 3000 * (h%12) - 50 * min
@@ -269,7 +269,7 @@ pub fn display_trig_clock() {
     let deg_whole = alpha_norm / 100;
     let deg_frac = alpha_norm % 100;
 
-    crate::user_messages::print_chronos_angle(deg_whole, deg_frac);
+    crate::kernel_messages::print_chronos_angle(deg_whole, deg_frac);
     let sin_sign = if sin_val < 0 { "-" } else { "" };
     let sin_abs = if sin_val < 0 { -sin_val } else { sin_val };
     crate::locale::print_localized_fmt(
@@ -295,7 +295,7 @@ pub fn display_trig_clock() {
             cos_radical
         ),
     );
-    crate::user_messages::print_chronos_roots(sin_radical, cos_radical);
+    crate::kernel_messages::print_chronos_roots(sin_radical, cos_radical);
 }
 
 // ============================================================
@@ -308,28 +308,28 @@ pub fn display_triple_time() {
     let report = crate::validator::probe_cmos();
     if !report.chip_alive {
         crate::locale::print_localized_line(
-            crate::user_messages::current(crate::user_messages::UiText::ChronosTimeNoChip),
+            crate::kernel_messages::current(crate::kernel_messages::UiText::ChronosTimeNoChip),
             0x0C,
         );
         return;
     }
     if !report.battery_ok {
         crate::locale::print_localized_line(
-            crate::user_messages::current(crate::user_messages::UiText::ChronosTimeDeadBattery),
+            crate::kernel_messages::current(crate::kernel_messages::UiText::ChronosTimeDeadBattery),
             0x0C,
         );
     }
-    let dt = crate::rtc::read_moscow_time();
+    let dt = crate::apps::rtc::read_moscow_time();
 
     // === Заголовок ===
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::ChronosHeader),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::ChronosHeader),
         0x0E,
     );
 
     // 1. Человеческое
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::ChronosHuman),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::ChronosHuman),
         0x0B,
     );
     crate::locale::print_localized_fmt(
@@ -342,7 +342,7 @@ pub fn display_triple_time() {
 
     // 2. Шестнадцатеричное (сырые регистры CMOS)
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::ChronosHex),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::ChronosHex),
         0x0B,
     );
     display_hex_time();
@@ -350,7 +350,7 @@ pub fn display_triple_time() {
     // 3. Психотаунское (Мир 100)
     let p = to_psychotown(dt.year, dt.month, dt.day);
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::ChronosPsychotown),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::ChronosPsychotown),
         0x0B,
     );
     crate::locale::print_localized_fmt(
@@ -361,19 +361,19 @@ pub fn display_triple_time() {
         ),
     );
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::ChronosPsychotownHint),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::ChronosPsychotownHint),
         0x0E,
     );
 
     // 4. Тригонометрические часы
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::ChronosTrigClock),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::ChronosTrigClock),
         0x0B,
     );
     display_trig_clock();
 
     crate::locale::print_localized_line(
-        crate::user_messages::current(crate::user_messages::UiText::ChronosFooter),
+        crate::kernel_messages::current(crate::kernel_messages::UiText::ChronosFooter),
         0x0A,
     );
 }

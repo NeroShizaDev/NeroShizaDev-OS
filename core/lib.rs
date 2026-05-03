@@ -33,8 +33,6 @@ extern crate alloc;
 // ================================================================
 // ОБЪЯВЛЕНИЕ ВНЕШНИХ ГРУПП МОДУЛЕЙ
 // Файлы расположены вне core/, поэтому указываем пути явно.
-// Rust resolves submodules relative to the #[path] file's directory,
-// поэтому vga/mod.rs → pub mod vga_buffer; найдёт vga/vga_buffer.rs.
 // ================================================================
 #[path = "../vga/mod.rs"]
 pub mod vga;
@@ -53,14 +51,13 @@ pub mod logo;
 /// crate::apps = apps/mod.rs (лаунчер программ: Doom/Games/Jackal)
 #[path = "../apps/mod.rs"]
 pub mod apps;
-
 // ================================================================
 // ФАЗА 1: Ранняя инициализация & Линия жизни
-// serial → vga_hw → vga_buffer → logo
+// serial → fb_buffer → logo
 // Цель: видеть вывод и логи до любой другой инициализации.
 // ================================================================
 pub mod serial;
-pub use vga::vga_buffer;
+pub use vga::fb_buffer;
 pub use vga::vga_hw;
 
 // ================================================================
@@ -70,7 +67,6 @@ pub use vga::vga_hw;
 // ================================================================
 pub mod gdt;
 pub mod interrupts;
-pub use apps::fpu;
 
 // ================================================================
 // ФАЗА 3: Память
@@ -88,9 +84,6 @@ pub mod irq_guard;
 pub mod port_firewall;
 pub mod trace;
 pub mod validator;
-pub use apps::chronos;
-pub use apps::rng;
-pub use apps::rtc;
 
 // ================================================================
 // ФАЗА 5: Железо и Ввод
@@ -98,7 +91,6 @@ pub use apps::rtc;
 // ps2: клавиатура/мышь. beeper: OK-сигнал после инициализации.
 // ================================================================
 pub mod ps2;
-pub use apps::beeper;
 
 // ================================================================
 // ФАЗА 6: Мультиязычность и Рендеринг текста
@@ -112,19 +104,12 @@ pub use fonts::unicode_categories;
 pub use fonts::unicode_scripts;
 pub use vga::vga_unicode;
 pub mod kernel_messages;
-pub mod user_messages;
 
 // ================================================================
 // ФАЗА 7: Пространство пользователя и Приложения
-// shell, logo и apps — объявлены выше с #[path].
-// games::doom и games::tribe живут внутри apps/games/.
-// menger, voodoo_math — из moduls/.
 // ================================================================
-pub use apps::menger;
 pub mod voodoo_engine;
 pub use crate::voodoo_engine::demo_cellular_automaton;
-// Compatibility alias: call sites using crate::voodoo_math still work
-pub use crate::voodoo_engine as voodoo_math;
 
 use core::panic::PanicInfo;
 
@@ -156,7 +141,14 @@ pub fn init() {
     gdt::init();
     interrupts::init_idt();
     unsafe { interrupts::PICS.lock().initialize() };
-    fpu::init();
+    // OVMF/UEFI оставляет IRQ0/IRQ1 замаскированными (ввод через USB HID, не PS/2).
+    // pic8259 0.11 сохраняет и восстанавливает маски UEFI при initialize() —
+    // поэтому клавиатура молчит. Явно снимаем маску с IRQ0 и IRQ1.
+    // Бит = 0 → разрешён, бит = 1 → заглушён.
+    // Master PIC: 0b11111100 → IRQ0 (таймер) и IRQ1 (клавиатура) активны.
+    // Slave PIC:  0xFF       → все заглушены (slave нам не нужны).
+    unsafe { interrupts::PICS.lock().write_masks(0b11111100, 0b11111111) };
+    apps::fpu::init();
 }
 
 pub fn hlt_loop() -> ! {
@@ -182,21 +174,21 @@ where
     fn run(&self) {
         let name = core::any::type_name::<T>();
         serial_print!("{}...\t", name);
-        // Имя теста на VGA (жёлтый, стандартный цвет)
+        // Имя теста на framebuffer (жёлтый, стандартный цвет)
         for &b in name.as_bytes() {
-            vga_buffer::WRITER.lock().write_byte(b);
+            fb_buffer::WRITER.lock().write_byte(b);
         }
         for &b in b"...\t" {
-            vga_buffer::WRITER.lock().write_byte(b);
+            fb_buffer::WRITER.lock().write_byte(b);
         }
         self();
         serial_println!("[ok]");
-        // Зелёный [ok] на VGA
+        // Зелёный [ok] на framebuffer
         {
-            let mut w = vga_buffer::WRITER.lock();
+            let mut w = fb_buffer::WRITER.lock();
             let saved = w.color_code;
             w.color_code =
-                vga_buffer::ColorCode::new(vga_buffer::Color::LightGreen, vga_buffer::Color::Black);
+                fb_buffer::ColorCode::new(fb_buffer::Color::LightGreen, fb_buffer::Color::Black);
             for &b in b"[ok]\n" {
                 w.write_byte(b);
             }

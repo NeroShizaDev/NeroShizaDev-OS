@@ -1540,7 +1540,7 @@ impl CalcApp {
     }
 
     unsafe fn draw(&self) {
-        crate::vga_buffer::clear_screen();
+        crate::fb_buffer::clear_screen();
         let title = if self.lang == Lang::Eng {
             "--- ENGINEERING CALCULATOR [IEEE 754 / ISO 60559] (x87 80-bit) ---"
         } else {

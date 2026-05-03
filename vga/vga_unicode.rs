@@ -1,100 +1,158 @@
 // ============================================================
-// VGA UNICODE — единственное место, которое знает как превратить
-// Unicode codepoint в VGA-байт.
+// VGA UNICODE — центральный диспетчер шрифтов и Unicode-рендеринга.
 // ============================================================
-// Слоты 0..127   — встроенный VGA-шрифт (ASCII, не трогаем)
-// Слоты 128..191 — статические глифы кириллицы (загружаем при старте)
-// Слоты 192..255 — динамический LRU-кеш для арабского, CJK и др.
+// Framebuffer (linear pixel mode):
+//   glyph_bitmap(cp) → прямой рендер из bitmap, без VGA-слотов.
+//   ASCII, кириллица, арабский рендерятся нативно через bios_font.
+//
+// Legacy VGA slot model:
+//   Слоты 0..127   — встроенный VGA-шрифт (ASCII)
+//   Слоты 128..191 — статические глифы кириллицы (plane 2)
+//   Слоты 192..255 — динамический LRU-кеш (арабский, CJK и др.)
 // ============================================================
 
-// --- VGA dimensions (runtime, not const) ---
+// --- Text grid dimensions ---
+// Ordinary rendering is framebuffer-only. Keep the cell grid tied to the
+// initialized framebuffer instead of legacy VGA text mode geometry.
 fn vga_columns() -> usize {
-    crate::vga_hw::get_columns()
+    crate::fb_buffer::get_cols()
 }
 fn vga_rows() -> usize {
-    crate::vga_hw::get_rows()
+    crate::fb_buffer::get_rows()
 }
 
 // ============================================================
 // КИРИЛЛИЦА — глифы хранятся в fonts::bios_font::CYRILLIC_GLYPHS
 // ============================================================
 
-/// Преобразует UTF-8 кириллический символ в наш VGA-код (128+).
-/// Возвращает None если символ не кириллический.
-pub fn cyrillic_to_vga(c: char) -> Option<u8> {
+/// Преобразует Unicode-символ кириллицы в индекс нашего bitmap-набора.
+/// Возвращает индекс 0..63 либо None, если символ не покрыт таблицей.
+fn cyrillic_glyph_index(c: char) -> Option<usize> {
     match c {
-        // Заглавные: А=128, Б=129, ... Я=159
-        'А' => Some(128),
-        'Б' => Some(129),
-        'В' => Some(130),
-        'Г' => Some(131),
-        'Д' => Some(132),
-        'Е' => Some(133),
-        'Ж' => Some(134),
-        'З' => Some(135),
-        'И' => Some(136),
-        'Й' => Some(137),
-        'К' => Some(138),
-        'Л' => Some(139),
-        'М' => Some(140),
-        'Н' => Some(141),
-        'О' => Some(142),
-        'П' => Some(143),
-        'Р' => Some(144),
-        'С' => Some(145),
-        'Т' => Some(146),
-        'У' => Some(147),
-        'Ф' => Some(148),
-        'Х' => Some(149),
-        'Ц' => Some(150),
-        'Ч' => Some(151),
-        'Ш' => Some(152),
-        'Щ' => Some(153),
-        'Ъ' => Some(154),
-        'Ы' => Some(155),
-        'Ь' => Some(156),
-        'Э' => Some(157),
-        'Ю' => Some(158),
-        'Я' => Some(159),
-        // Строчные: а=160, б=161, ... я=191
-        'а' => Some(160),
-        'б' => Some(161),
-        'в' => Some(162),
-        'г' => Some(163),
-        'д' => Some(164),
-        'е' => Some(165),
-        'ж' => Some(166),
-        'з' => Some(167),
-        'и' => Some(168),
-        'й' => Some(169),
-        'к' => Some(170),
-        'л' => Some(171),
-        'м' => Some(172),
-        'н' => Some(173),
-        'о' => Some(174),
-        'п' => Some(175),
-        'р' => Some(176),
-        'с' => Some(177),
-        'т' => Some(178),
-        'у' => Some(179),
-        'ф' => Some(180),
-        'х' => Some(181),
-        'ц' => Some(182),
-        'ч' => Some(183),
-        'ш' => Some(184),
-        'щ' => Some(185),
-        'ъ' => Some(186),
-        'ы' => Some(187),
-        'ь' => Some(188),
-        'э' => Some(189),
-        'ю' => Some(190),
-        'я' => Some(191),
-        // Ё/ё — маппим на Е/е
-        'Ё' => Some(133),
-        'ё' => Some(165),
+        // Заглавные: А=0, Б=1, ... Я=31
+        'А' => Some(0),
+        'Б' => Some(1),
+        'В' => Some(2),
+        'Г' => Some(3),
+        'Д' => Some(4),
+        'Е' => Some(5),
+        'Ж' => Some(6),
+        'З' => Some(7),
+        'И' => Some(8),
+        'Й' => Some(9),
+        'К' => Some(10),
+        'Л' => Some(11),
+        'М' => Some(12),
+        'Н' => Some(13),
+        'О' => Some(14),
+        'П' => Some(15),
+        'Р' => Some(16),
+        'С' => Some(17),
+        'Т' => Some(18),
+        'У' => Some(19),
+        'Ф' => Some(20),
+        'Х' => Some(21),
+        'Ц' => Some(22),
+        'Ч' => Some(23),
+        'Ш' => Some(24),
+        'Щ' => Some(25),
+        'Ъ' => Some(26),
+        'Ы' => Some(27),
+        'Ь' => Some(28),
+        'Э' => Some(29),
+        'Ю' => Some(30),
+        'Я' => Some(31),
+        // Строчные: а=32, б=33, ... я=63
+        'а' => Some(32),
+        'б' => Some(33),
+        'в' => Some(34),
+        'г' => Some(35),
+        'д' => Some(36),
+        'е' => Some(37),
+        'ж' => Some(38),
+        'з' => Some(39),
+        'и' => Some(40),
+        'й' => Some(41),
+        'к' => Some(42),
+        'л' => Some(43),
+        'м' => Some(44),
+        'н' => Some(45),
+        'о' => Some(46),
+        'п' => Some(47),
+        'р' => Some(48),
+        'с' => Some(49),
+        'т' => Some(50),
+        'у' => Some(51),
+        'ф' => Some(52),
+        'х' => Some(53),
+        'ц' => Some(54),
+        'ч' => Some(55),
+        'ш' => Some(56),
+        'щ' => Some(57),
+        'ъ' => Some(58),
+        'ы' => Some(59),
+        'ь' => Some(60),
+        'э' => Some(61),
+        'ю' => Some(62),
+        'я' => Some(63),
+        // Ё/ё — пока используем форму Е/е, но остаёмся в Unicode-модели.
+        'Ё' => Some(5),
+        'ё' => Some(37),
         _ => None,
     }
 }
+
+/// Возвращает 8x16 bitmap для codepoint, если у нас есть прямой Unicode-глиф.
+pub fn glyph_bitmap(cp: u32) -> Option<&'static [u8; 16]> {
+    if cp < 128 {
+        return Some(&crate::fonts::bios_font::VGA_FONT_8X16[cp as usize]);
+    }
+    if let Some(idx) = cyrillic_glyph_index(char::from_u32(cp).unwrap_or('\0')) {
+        if idx < crate::fonts::bios_font::CYRILLIC_GLYPHS.len() {
+            return Some(&crate::fonts::bios_font::CYRILLIC_GLYPHS[idx]);
+        }
+    }
+    get_any_glyph_bitmap(cp)
+}
+
+/// Возвращает runtime-глиф для framebuffer-пути из единого внешнего Unicode-font.
+/// Это отделено от bios_font.rs, который остаётся legacy/error-источником.
+fn runtime_unifont_bitmap(cp: u32) -> Option<[u8; 16]> {
+    let ch = char::from_u32(cp)?;
+    let glyph = baremetal_unifont::get_glyph(ch)?;
+    if glyph.width() != 8 {
+        return None;
+    }
+
+    let mut rows = [0u8; 16];
+    let mut y = 0usize;
+    while y < 16 {
+        let mut bits = 0u8;
+        let mut x = 0usize;
+        while x < 8 {
+            if glyph.get(x, y) {
+                bits |= 1 << (7 - x);
+            }
+            x += 1;
+        }
+        rows[y] = bits;
+        y += 1;
+    }
+
+    Some(rows)
+}
+
+pub fn runtime_glyph_bitmap(cp: u32) -> Option<[u8; 16]> {
+    if let Some(rows) = runtime_unifont_bitmap(cp) {
+        return Some(rows);
+    }
+
+    get_any_glyph_bitmap(cp).copied()
+}
+
+static GLYPH_MIDDLE_DOT: [u8; 16] = [
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
 
 /// Загружает кириллический шрифт в VGA plane 2 (слоты 128..191).
 /// Вызывать при старте до любого вывода кириллического текста.
@@ -104,6 +162,25 @@ pub fn cyrillic_to_vga(c: char) -> Option<u8> {
 /// текстовый режим. Требует: VGA identity-mapped, вызывать вне активного font mode
 /// (не реентрантно). Без прерываний во время выполнения.
 pub unsafe fn load_static_glyphs() {
+    // Если активен линейный framebuffer — рендерер использует CYRILLIC_GLYPHS напрямую
+    // (get_glyph в fb_buffer.rs), VGA plane 2 ему не нужен. Запись в VGA sequencer
+    // при активном VBE переключает дисплей обратно в legacy text path, из-за чего
+    // весь вывод Phase 6/7 становится невидимым.
+    if crate::fb_buffer::is_initialized() {
+        crate::serial_println!(
+            "[VGA] load_static_glyphs: framebuffer active, skipping VGA plane 2 writes"
+        );
+        return;
+    }
+    // RTX 3060 / современные GPU без legacy VGA: probe_vga() вернёт false (0xFF на 0x3DA).
+    // Если VGA не отвечает — enter/exit_font_mode пишут в SEQ/GC регистры впустую или
+    // вешают машину. Глифы в plane 2 всё равно недоступны — пропускаем.
+    if !crate::validator::probe_vga() {
+        crate::serial_println!(
+            "[VGA] load_static_glyphs: no VGA controller, skipping font plane writes"
+        );
+        return;
+    }
     x86_64::instructions::interrupts::without_interrupts(|| {
         // SAFETY: vga_hw::enter/exit_font_mode управляют переключением VGA plane 2.
         // 0xA0000 — font plane, identity-mapped. char_offset = (128+i)*32 < 192*32 = 6144
@@ -124,6 +201,82 @@ pub unsafe fn load_static_glyphs() {
 
         crate::vga_hw::exit_font_mode();
     });
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnicodeRuntimeInitMode {
+    FramebufferDirect,
+    LegacyVgaLoaded,
+    LegacyVgaUnavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnicodeRuntimeInitReport {
+    pub mode: UnicodeRuntimeInitMode,
+    pub ready: usize,
+    pub checked: usize,
+    pub cyrillic_ready: bool,
+    pub arabic_ready: bool,
+}
+
+const FRAMEBUFFER_WARMUP_GLYPHS: [char; 11] =
+    ['Я', 'я', 'Ё', 'ё', 'ش', 'ل', 'ع', 'ة', '؟', '٠', '١'];
+
+pub fn init_runtime_after_shell() -> UnicodeRuntimeInitReport {
+    if crate::fb_buffer::is_initialized() {
+        let mut ready = 0usize;
+        for ch in FRAMEBUFFER_WARMUP_GLYPHS {
+            if glyph_bitmap(ch as u32).is_some() {
+                ready += 1;
+            }
+        }
+
+        let report = UnicodeRuntimeInitReport {
+            mode: UnicodeRuntimeInitMode::FramebufferDirect,
+            ready,
+            checked: FRAMEBUFFER_WARMUP_GLYPHS.len(),
+            cyrillic_ready: glyph_bitmap('Я' as u32).is_some()
+                && glyph_bitmap('ё' as u32).is_some(),
+            arabic_ready: glyph_bitmap('ش' as u32).is_some()
+                && glyph_bitmap('ة' as u32).is_some()
+                && glyph_bitmap('؟' as u32).is_some(),
+        };
+
+        crate::serial_println!(
+            "[UNICODE] runtime init after shell: mode=framebuffer ready={}/{} cyr={} ar={}",
+            report.ready,
+            report.checked,
+            if report.cyrillic_ready { 1 } else { 0 },
+            if report.arabic_ready { 1 } else { 0 }
+        );
+        return report;
+    }
+
+    if !crate::validator::probe_vga() {
+        let report = UnicodeRuntimeInitReport {
+            mode: UnicodeRuntimeInitMode::LegacyVgaUnavailable,
+            ready: 0,
+            checked: 0,
+            cyrillic_ready: false,
+            arabic_ready: false,
+        };
+        crate::serial_println!("[UNICODE] runtime init after shell: mode=legacy-vga-unavailable");
+        return report;
+    }
+
+    unsafe { load_static_glyphs() };
+    let report = UnicodeRuntimeInitReport {
+        mode: UnicodeRuntimeInitMode::LegacyVgaLoaded,
+        ready: crate::fonts::bios_font::CYRILLIC_GLYPHS.len(),
+        checked: crate::fonts::bios_font::CYRILLIC_GLYPHS.len(),
+        cyrillic_ready: true,
+        arabic_ready: false,
+    };
+    crate::serial_println!(
+        "[UNICODE] runtime init after shell: mode=legacy-vga loaded={} cyr=1 ar=0",
+        report.ready
+    );
+    report
 }
 
 // ============================================================
@@ -343,11 +496,25 @@ pub fn codepoint_to_vga_byte(cp: u32) -> Option<u8> {
     match cp {
         0x03C0 => return Some(0xE3),
         0x221E => return Some(0xEC),
+        0x2550 => return Some(0xCD),
+        0x2551 => return Some(0xBA),
+        0x2554 => return Some(0xC9),
+        0x2557 => return Some(0xBB),
+        0x255A => return Some(0xC8),
+        0x255D => return Some(0xBC),
+        0x2560 => return Some(0xCC),
+        0x2563 => return Some(0xB9),
+        0x2588 => return Some(0xDB),
+        0x2584 => return Some(0xDC),
+        0x2580 => return Some(0xDF),
+        0x2591 => return Some(0xB0),
+        0x2592 => return Some(0xB1),
+        0x2593 => return Some(0xB2),
         _ => {}
     }
-    // 2. Кириллица — слоты 128-191, загружены load_static_glyphs() при старте
-    if let Some(vga_code) = cyrillic_to_vga(char::from_u32(cp).unwrap_or('\0')) {
-        return Some(vga_code);
+    // 2. Кириллица — только здесь переводим Unicode-индекс в legacy VGA slot.
+    if let Some(idx) = cyrillic_glyph_index(char::from_u32(cp).unwrap_or('\0')) {
+        return Some((128 + idx) as u8);
     }
     // 3. Динамический кеш — слоты 192-255, LRU eviction
     ensure_glyph_cached(cp)
@@ -362,7 +529,6 @@ const GLYPH_CACHE_END: usize = 256;
 const GLYPH_CACHE_SIZE: usize = GLYPH_CACHE_END - GLYPH_CACHE_START;
 
 const FONT_PLANE_ADDR: usize = 0xA0000;
-const VGA_TEXT_ADDR: usize = 0xB8000;
 const BYTES_PER_GLYPH: usize = 32;
 
 static mut SLOT_CODEPOINT: [u32; GLYPH_CACHE_SIZE] = [0; GLYPH_CACHE_SIZE];
@@ -494,6 +660,10 @@ pub fn ensure_glyph_cached(codepoint: u32) -> Option<u8> {
         let bitmap = get_any_glyph_bitmap(codepoint)?;
         let cache_idx = allocate_slot(false);
 
+        // RTX 3060: если VGA не отвечает — не трогаем font-mode регистры.
+        if !crate::validator::probe_vga() {
+            return None;
+        }
         crate::vga_hw::enter_font_mode();
         write_glyph_to_slot(GLYPH_CACHE_START + cache_idx, bitmap);
         crate::vga_hw::exit_font_mode();
@@ -510,6 +680,9 @@ pub fn ensure_glyph_cached(codepoint: u32) -> Option<u8> {
 
 /// Dispatches glyph bitmap lookup across all registered font sources.
 fn get_any_glyph_bitmap(cp: u32) -> Option<&'static [u8; 16]> {
+    if cp == 0x00B7 {
+        return Some(&GLYPH_MIDDLE_DOT);
+    }
     if let Some(bmp) = arabic_get_glyph(cp) {
         return Some(bmp);
     }
@@ -527,21 +700,6 @@ pub fn print_char(codepoint: u32, x: usize, y: usize, color: u8) -> usize {
     if x >= vga_columns() || y >= vga_rows() {
         return 0;
     }
-    let byte = codepoint_to_vga_byte(codepoint).unwrap_or(b'?');
-    unsafe {
-        write_vga_cell(x, y, byte, color);
-    }
+    crate::fb_buffer::write_codepoint_at(x, y, codepoint, color);
     1
-}
-
-/// Write a single (character, attribute) pair into the VGA text buffer.
-///
-/// # Safety
-/// offset = (y*80 + x)*2, при x<80 y<25 → offset < 8000 (< 4000 слов VGA).
-/// write_volatile обязателен — 0xB8000 MMIO.
-unsafe fn write_vga_cell(x: usize, y: usize, ch: u8, attr: u8) {
-    let offset = (y * vga_columns() + x) * 2;
-    let base = VGA_TEXT_ADDR as *mut u8;
-    core::ptr::write_volatile(base.add(offset), ch);
-    core::ptr::write_volatile(base.add(offset + 1), attr);
 }
