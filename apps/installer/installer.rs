@@ -18,11 +18,14 @@
 //   `install` или `install demo` → installer::run(data, label)
 // ============================================================
 
+use super::catalog;
 use super::crc32;
 use super::header::{self, HEADER_SIZE, MANIFEST_SIZE, NhsHeader, NhsManifest};
 use super::registry;
 use super::slots;
 use x86_64::instructions::hlt;
+
+const MAX_AFFECTED_OBJECTS: usize = 6;
 
 // ── Результат установки ──────────────────────────────────────
 
@@ -50,6 +53,76 @@ impl InstallResult {
             Self::AlreadyInstalled => "App already installed",
             Self::UserCanceled => "Installation canceled by user",
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UninstallError {
+    NotInstalled,
+    Protected,
+    RegistryCorrupt,
+    UserCanceled,
+}
+
+impl UninstallError {
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::NotInstalled => "App is not installed",
+            Self::Protected => "Protected core component cannot be removed",
+            Self::RegistryCorrupt => "Registry entry is broken",
+            Self::UserCanceled => "Removal canceled",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct UninstallPreview {
+    slot: usize,
+    built_in: bool,
+    name: [u8; 32],
+    owner: [u8; super::nsfs::NSFS_OWNER_CAPACITY],
+    owner_len: usize,
+    direct_objects: u16,
+    direct_bytes: u64,
+    fallback_objects: u16,
+    fallback_bytes: u64,
+    affected_paths: [[u8; super::nsfs::NSFS_NAME_CAPACITY]; MAX_AFFECTED_OBJECTS],
+    affected_lens: [usize; MAX_AFFECTED_OBJECTS],
+    affected_count: usize,
+}
+
+impl UninstallPreview {
+    fn name_str(&self) -> &str {
+        let end = self
+            .name
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.name.len());
+        core::str::from_utf8(&self.name[..end]).unwrap_or("?")
+    }
+
+    fn owner_str(&self) -> &str {
+        core::str::from_utf8(&self.owner[..self.owner_len]).unwrap_or("")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UninstallReport {
+    pub slot: usize,
+    pub removed_objects: u16,
+    pub removed_bytes: u64,
+    pub leftover_objects: u16,
+    pub leftover_bytes: u64,
+    pub built_in: bool,
+}
+
+impl UninstallReport {
+    pub fn total_removed_objects(self) -> u16 {
+        self.removed_objects + self.leftover_objects
+    }
+
+    pub fn total_removed_bytes(self) -> u64 {
+        self.removed_bytes + self.leftover_bytes
     }
 }
 
@@ -218,36 +291,342 @@ pub fn install(data: &[u8]) -> InstallResult {
     InstallResult::Ok(slot)
 }
 
-/// Удаляет установленное приложение.
-/// Аналог: "Программы и компоненты" → Удалить.
-pub fn uninstall(slot: usize) -> bool {
-    if !slots::is_occupied(slot) {
-        return false;
+/// Удаляет установленное приложение безопасно.
+/// Аналог: штатный uninstall + cleanup хвостов, но без затрагивания shell/core.
+pub fn uninstall(slot: usize) -> Result<UninstallReport, UninstallError> {
+    let preview = build_uninstall_preview(slot)?;
+
+    show_uninstall_review_screen(&preview);
+    if !wait_confirm() {
+        return Err(UninstallError::UserCanceled);
     }
 
-    let name = match registry::get(slot) {
-        Some(r) => {
-            let mut n = [0u8; 32];
-            n.copy_from_slice(&r.name);
-            n
-        }
-        None => return false,
+    show_uninstall_scan_screen(&preview);
+    if !wait_confirm() {
+        return Err(UninstallError::UserCanceled);
+    }
+
+    show_uninstall_confirm_screen(&preview);
+    if !wait_confirm() {
+        return Err(UninstallError::UserCanceled);
+    }
+
+    let report = apply_uninstall_preview(&preview)?;
+    show_uninstall_summary_screen(&preview, &report);
+    wait_key();
+    Ok(report)
+}
+
+fn build_uninstall_preview(slot: usize) -> Result<UninstallPreview, UninstallError> {
+    if !slots::is_occupied(slot) {
+        return Err(UninstallError::NotInstalled);
+    }
+
+    let app = match registry::get(slot) {
+        Some(app) => *app,
+        None => return Err(UninstallError::RegistryCorrupt),
     };
 
-    slots::uninstall_slot(slot);
-    registry::unregister(slot);
+    let mut owner = [0u8; super::nsfs::NSFS_OWNER_CAPACITY];
+    let owner_len = if app.is_builtin() {
+        let Some(spec) = catalog::find_builtin_by_kind(app.launch_kind()) else {
+            return Err(UninstallError::RegistryCorrupt);
+        };
+        if is_protected_builtin(spec.slug) {
+            return Err(UninstallError::Protected);
+        }
+        let bytes = spec.slug.as_bytes();
+        owner[..bytes.len()].copy_from_slice(bytes);
+        bytes.len()
+    } else {
+        let owner_text =
+            slot_owner_slug_text(slot, &mut owner).ok_or(UninstallError::RegistryCorrupt)?;
+        owner_text.len()
+    };
 
-    // Показываем подтверждение
-    let name_end = name.iter().position(|&b| b == 0).unwrap_or(32);
-    crate::locale::print_localized_fmt(
-        0x0A,
-        format_args!(
-            "[NHS] Uninstalled: {}",
-            core::str::from_utf8(&name[..name_end]).unwrap_or("?")
-        ),
-    );
+    let owner_str = core::str::from_utf8(&owner[..owner_len]).unwrap_or("");
+    let direct = slots::scan_owner_stats(owner_str);
+    let mut fallback = slots::RemovalStats {
+        removed_objects: 0,
+        removed_bytes: 0,
+    };
+    for prefix in preview_leftover_prefixes(&app, owner_str) {
+        let stats = slots::scan_prefix_stats(prefix);
+        fallback.removed_objects += stats.removed_objects;
+        fallback.removed_bytes += stats.removed_bytes;
+    }
 
-    true
+    let mut preview = UninstallPreview {
+        slot,
+        built_in: app.is_builtin(),
+        name: app.name,
+        owner,
+        owner_len,
+        direct_objects: direct.removed_objects,
+        direct_bytes: direct.removed_bytes,
+        fallback_objects: fallback.removed_objects,
+        fallback_bytes: fallback.removed_bytes,
+        affected_paths: [[0u8; super::nsfs::NSFS_NAME_CAPACITY]; MAX_AFFECTED_OBJECTS],
+        affected_lens: [0; MAX_AFFECTED_OBJECTS],
+        affected_count: 0,
+    };
+
+    slots::for_each_owned_object(owner_str, |entry| {
+        if preview.affected_count >= MAX_AFFECTED_OBJECTS {
+            return;
+        }
+        let index = preview.affected_count;
+        let path = entry.path().as_bytes();
+        preview.affected_paths[index][..path.len()].copy_from_slice(path);
+        preview.affected_lens[index] = path.len();
+        preview.affected_count += 1;
+    });
+
+    Ok(preview)
+}
+
+fn apply_uninstall_preview(preview: &UninstallPreview) -> Result<UninstallReport, UninstallError> {
+    let app = match registry::get(preview.slot) {
+        Some(app) => *app,
+        None => return Err(UninstallError::RegistryCorrupt),
+    };
+
+    let direct = slots::remove_owner(preview.owner_str());
+    let mut fallback = slots::RemovalStats {
+        removed_objects: 0,
+        removed_bytes: 0,
+    };
+    for prefix in preview_leftover_prefixes(&app, preview.owner_str()) {
+        let stats = slots::remove_prefix(prefix);
+        fallback.removed_objects += stats.removed_objects;
+        fallback.removed_bytes += stats.removed_bytes;
+    }
+
+    if !slots::clear_slot_state(preview.slot) {
+        return Err(UninstallError::RegistryCorrupt);
+    }
+    if !registry::unregister(preview.slot) {
+        return Err(UninstallError::RegistryCorrupt);
+    }
+
+    Ok(UninstallReport {
+        slot: preview.slot,
+        removed_objects: direct.removed_objects,
+        removed_bytes: direct.removed_bytes,
+        leftover_objects: fallback.removed_objects,
+        leftover_bytes: fallback.removed_bytes,
+        built_in: preview.built_in,
+    })
+}
+
+fn is_protected_builtin(slug: &str) -> bool {
+    matches!(slug, "shell" | "unicode" | "commands" | "core")
+}
+
+fn preview_leftover_prefixes<'a>(
+    app: &registry::InstalledApp,
+    owner_slug: &'a str,
+) -> [&'a str; 4] {
+    if app.is_builtin() {
+        builtin_leftover_prefixes(owner_slug)
+    } else {
+        nhs_leftover_prefixes(owner_slug)
+    }
+}
+
+fn slot_owner_slug_text<'a>(
+    slot: usize,
+    out: &'a mut [u8; super::nsfs::NSFS_OWNER_CAPACITY],
+) -> Option<&'a str> {
+    let prefix = b"nhs.slot";
+    if prefix.len() >= out.len() {
+        return None;
+    }
+    out[..prefix.len()].copy_from_slice(prefix);
+    let len = fmt_u32(&mut out[prefix.len()..], slot as u32);
+    core::str::from_utf8(&out[..prefix.len() + len]).ok()
+}
+
+fn builtin_leftover_prefixes(slug: &str) -> [&str; 4] {
+    match slug {
+        "games" => ["save/games/", "cfg/games/", "logs/games/", "tmp/games/"],
+        "doom" => ["save/doom/", "cfg/doom/", "logs/doom/", "tmp/doom/"],
+        "tribe" => ["save/tribe/", "cfg/tribe/", "logs/tribe/", "tmp/tribe/"],
+        "jackal" => ["save/jackal/", "cfg/jackal/", "logs/jackal/", "tmp/jackal/"],
+        "menger" => ["save/menger/", "cfg/menger/", "logs/menger/", "tmp/menger/"],
+        "calculator" => [
+            "save/calculator/",
+            "cfg/calculator/",
+            "logs/calculator/",
+            "tmp/calculator/",
+        ],
+        "fpu" => ["save/fpu/", "cfg/fpu/", "logs/fpu/", "tmp/fpu/"],
+        "voodoo" => ["save/voodoo/", "cfg/voodoo/", "logs/voodoo/", "tmp/voodoo/"],
+        "rng" => ["save/rng/", "cfg/rng/", "logs/rng/", "tmp/rng/"],
+        "chronos" => [
+            "save/chronos/",
+            "cfg/chronos/",
+            "logs/chronos/",
+            "tmp/chronos/",
+        ],
+        "rtc" => ["save/rtc/", "cfg/rtc/", "logs/rtc/", "tmp/rtc/"],
+        "beeper" => ["save/beeper/", "cfg/beeper/", "logs/beeper/", "tmp/beeper/"],
+        "language" => [
+            "save/language/",
+            "cfg/language/",
+            "logs/language/",
+            "tmp/language/",
+        ],
+        _ => [
+            "save/unknown/",
+            "cfg/unknown/",
+            "logs/unknown/",
+            "tmp/unknown/",
+        ],
+    }
+}
+
+fn nhs_leftover_prefixes(_app_name: &str) -> [&str; 4] {
+    ["save/user/", "cfg/user/", "logs/user/", "tmp/user/"]
+}
+
+fn show_uninstall_review_screen(preview: &UninstallPreview) {
+    unsafe {
+        fill_screen(BG);
+        puts(1, 19, b"APP REMOVAL MANAGER v1.0", TITLE);
+        draw_box(BOX_ROW, BOX_COL, BOX_W, 12);
+        let row = BOX_ROW + 1;
+        put(row, BOX_COL, VT, BORDER);
+        fill_seg(row, BOX_COL + 1, BOX_W, TITLE);
+        puts(row, BOX_COL + 17, b"REVIEW", TITLE);
+        put(row, BOX_COL + BOX_W + 1, VT, BORDER);
+        div_row(row + 1);
+        field_row(row + 2, b"App:", preview.name_str().as_bytes());
+        field_row(
+            row + 3,
+            b"Type:",
+            if preview.built_in {
+                b"built-in app"
+            } else {
+                b"user package"
+            },
+        );
+        let mut slot_buf = [0u8; 6];
+        let slot_len = fmt_u32(&mut slot_buf, preview.slot as u32);
+        field_row(row + 4, b"Slot:", &slot_buf[..slot_len]);
+        field_row(row + 5, b"Owner:", preview.owner_str().as_bytes());
+        let mut direct_buf = [0u8; 8];
+        let direct_len = fmt_u32(&mut direct_buf, preview.direct_objects as u32);
+        field_row(row + 6, b"Owned:", &direct_buf[..direct_len]);
+        let mut legacy_buf = [0u8; 8];
+        let legacy_len = fmt_u32(&mut legacy_buf, preview.fallback_objects as u32);
+        field_row(row + 7, b"Legacy:", &legacy_buf[..legacy_len]);
+        blank_row(row + 8);
+        put(row + 9, BOX_COL, VT, BORDER);
+        fill_seg(row + 9, BOX_COL + 1, BOX_W, BG);
+        puts(
+            row + 9,
+            BOX_COL + 3,
+            b"Enter = Scan objects    Esc = Cancel",
+            HINT,
+        );
+        put(row + 9, BOX_COL + BOX_W + 1, VT, BORDER);
+    }
+}
+
+fn show_uninstall_scan_screen(preview: &UninstallPreview) {
+    unsafe {
+        fill_screen(BG);
+        puts(1, 19, b"APP REMOVAL MANAGER v1.0", TITLE);
+        draw_box(BOX_ROW, BOX_COL, BOX_W, 14);
+        let row = BOX_ROW + 1;
+        put(row, BOX_COL, VT, BORDER);
+        fill_seg(row, BOX_COL + 1, BOX_W, TITLE);
+        puts(row, BOX_COL + 9, b"SCAN AFFECTED OBJECTS", TITLE);
+        put(row, BOX_COL + BOX_W + 1, VT, BORDER);
+        div_row(row + 1);
+        field_row(row + 2, b"App:", preview.name_str().as_bytes());
+        field_row(row + 3, b"Owner:", preview.owner_str().as_bytes());
+        let mut current_row = row + 5;
+        for index in 0..preview.affected_count {
+            put(current_row, BOX_COL, VT, BORDER);
+            fill_seg(current_row, BOX_COL + 1, BOX_W, BG);
+            puts(
+                current_row,
+                BOX_COL + 3,
+                &preview.affected_paths[index][..preview.affected_lens[index]],
+                VALUE,
+            );
+            put(current_row, BOX_COL + BOX_W + 1, VT, BORDER);
+            current_row += 1;
+        }
+        while current_row < row + 10 {
+            blank_row(current_row);
+            current_row += 1;
+        }
+        put(current_row, BOX_COL, VT, BORDER);
+        fill_seg(current_row, BOX_COL + 1, BOX_W, BG);
+        puts(
+            current_row,
+            BOX_COL + 3,
+            b"Enter = Confirm removal    Esc = Cancel",
+            HINT,
+        );
+        put(current_row, BOX_COL + BOX_W + 1, VT, BORDER);
+    }
+}
+
+fn show_uninstall_confirm_screen(preview: &UninstallPreview) {
+    unsafe {
+        fill_screen(BG);
+        puts(1, 19, b"APP REMOVAL MANAGER v1.0", TITLE);
+        draw_box(BOX_ROW + 2, BOX_COL, BOX_W, 8);
+        let row = BOX_ROW + 3;
+        put(row, BOX_COL, VT, BORDER);
+        fill_seg(row, BOX_COL + 1, BOX_W, ERROR);
+        puts(row, BOX_COL + 10, b"FINAL CONFIRMATION", ERROR);
+        put(row, BOX_COL + BOX_W + 1, VT, BORDER);
+        div_row(row + 1);
+        field_row(row + 2, b"App:", preview.name_str().as_bytes());
+        field_row(row + 3, b"Owner:", preview.owner_str().as_bytes());
+        put(row + 5, BOX_COL, VT, BORDER);
+        fill_seg(row + 5, BOX_COL + 1, BOX_W, BG);
+        puts(
+            row + 5,
+            BOX_COL + 3,
+            b"Enter = Remove permanently    Esc = Cancel",
+            HINT,
+        );
+        put(row + 5, BOX_COL + BOX_W + 1, VT, BORDER);
+    }
+}
+
+fn show_uninstall_summary_screen(preview: &UninstallPreview, report: &UninstallReport) {
+    unsafe {
+        fill_screen(BG);
+        puts(1, 19, b"APP REMOVAL MANAGER v1.0", TITLE);
+        draw_box(BOX_ROW + 2, BOX_COL, BOX_W, 9);
+        let row = BOX_ROW + 3;
+        put(row, BOX_COL, VT, BORDER);
+        fill_seg(row, BOX_COL + 1, BOX_W, OK);
+        puts(row, BOX_COL + 12, b"REMOVAL COMPLETE", OK);
+        put(row, BOX_COL + BOX_W + 1, VT, BORDER);
+        div_row(row + 1);
+        field_row(row + 2, b"App:", preview.name_str().as_bytes());
+        let mut obj_buf = [0u8; 10];
+        let obj_len = fmt_u32(&mut obj_buf, report.total_removed_objects() as u32);
+        field_row(row + 3, b"Objects:", &obj_buf[..obj_len]);
+        let mut bytes_buf = [0u8; 20];
+        let bytes_len = fmt_u64(&mut bytes_buf, report.total_removed_bytes());
+        field_row(row + 4, b"Bytes:", &bytes_buf[..bytes_len]);
+        let mut fallback_buf = [0u8; 10];
+        let fallback_len = fmt_u32(&mut fallback_buf, report.leftover_objects as u32);
+        field_row(row + 5, b"Legacy:", &fallback_buf[..fallback_len]);
+        put(row + 7, BOX_COL, VT, BORDER);
+        fill_seg(row + 7, BOX_COL + 1, BOX_W, BG);
+        puts(row + 7, BOX_COL + 3, b"Press any key to return", HINT);
+        put(row + 7, BOX_COL + BOX_W + 1, VT, BORDER);
+    }
 }
 
 // ============================================================
@@ -609,4 +988,23 @@ fn fmt_version(buf: &mut [u8], major: u8, minor: u8, patch: u8) -> usize {
     pos += 1;
     pos += fmt_u32(&mut buf[pos..], patch as u32);
     pos
+}
+
+fn fmt_u64(buf: &mut [u8], val: u64) -> usize {
+    if val == 0 {
+        buf[0] = b'0';
+        return 1;
+    }
+    let mut tmp = [0u8; 20];
+    let mut n = 0usize;
+    let mut v = val;
+    while v > 0 {
+        tmp[n] = b'0' + (v % 10) as u8;
+        v /= 10;
+        n += 1;
+    }
+    for i in 0..n {
+        buf[i] = tmp[n - 1 - i];
+    }
+    n
 }

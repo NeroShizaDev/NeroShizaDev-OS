@@ -208,8 +208,8 @@ where
 
         let initialized = &mut regions[..next_index];
         unsafe {
-            // inlined variant of: `MaybeUninit::slice_assume_init_mut(initialized)`
-            // TODO: undo inlining when `slice_assume_init_mut` becomes stable
+            // Inlined variant of `MaybeUninit::slice_assume_init_mut(initialized)`.
+            // Kept local so this patch does not depend on unstable helpers.
             &mut *(initialized as *mut [_] as *mut [_])
         }
     }

@@ -52,6 +52,31 @@ pub enum AppKind {
     Locale = 11,
     /// NHS installed app — run NeroShizaScript from slot LAUNCH_NHS_SLOT.
     Nhs = 12,
+    Doom = 13,
+    Tribe = 14,
+}
+
+impl AppKind {
+    pub const fn from_registry_id(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Launcher),
+            1 => Some(Self::Games),
+            2 => Some(Self::Calculator),
+            3 => Some(Self::Jackal),
+            4 => Some(Self::Menger),
+            5 => Some(Self::Voodoo),
+            6 => Some(Self::Chronos),
+            7 => Some(Self::Rtc),
+            8 => Some(Self::Rng),
+            9 => Some(Self::Beeper),
+            10 => Some(Self::Fpu),
+            11 => Some(Self::Locale),
+            12 => Some(Self::Nhs),
+            13 => Some(Self::Doom),
+            14 => Some(Self::Tribe),
+            _ => None,
+        }
+    }
 }
 
 // ── Stack slot ────────────────────────────────────────────────────────────────
@@ -194,6 +219,16 @@ fn dispatch_lifecycle(kind: AppKind, ev: Lifecycle) {
         (AppKind::Nhs, Lifecycle::Resume) => {}
         (AppKind::Nhs, Lifecycle::Pause) => {}
         (AppKind::Nhs, Lifecycle::Destroy) => {}
+
+        (AppKind::Doom, Lifecycle::Start) => {}
+        (AppKind::Doom, Lifecycle::Resume) => {}
+        (AppKind::Doom, Lifecycle::Pause) => {}
+        (AppKind::Doom, Lifecycle::Destroy) => {}
+
+        (AppKind::Tribe, Lifecycle::Start) => {}
+        (AppKind::Tribe, Lifecycle::Resume) => {}
+        (AppKind::Tribe, Lifecycle::Pause) => {}
+        (AppKind::Tribe, Lifecycle::Destroy) => {}
     }
 }
 
@@ -256,6 +291,14 @@ fn dispatch_update(kind: AppKind, depth: usize) -> ActivityIntent {
         AppKind::Nhs => {
             let slot = unsafe { crate::apps::launcher::LAUNCH_NHS_SLOT as usize };
             crate::apps::installer::runtime::run_slot(slot);
+            ActivityIntent::Pop
+        }
+        AppKind::Doom => {
+            crate::apps::games::doom::run();
+            ActivityIntent::Pop
+        }
+        AppKind::Tribe => {
+            crate::apps::games::tribe::run();
             ActivityIntent::Pop
         }
     }
@@ -383,6 +426,8 @@ pub fn app_kind_name(k: AppKind) -> &'static str {
         AppKind::Fpu => "Fpu",
         AppKind::Locale => "Locale",
         AppKind::Nhs => "Nhs",
+        AppKind::Doom => "Doom",
+        AppKind::Tribe => "Tribe",
     }
 }
 

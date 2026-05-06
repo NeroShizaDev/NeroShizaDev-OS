@@ -5,11 +5,11 @@ authors = ["NeroShizaDev"]
 edition = "2024"
 
 [lib]
-name = "blog_os"
+name = "neroshiza_dev_os"
 path = "core/lib.rs"
 
 [[bin]]
-name = "blog_os"
+name = "neroshiza_dev_os"
 path = "core/main.rs"
 
 [[test]]
@@ -24,11 +24,23 @@ harness = false
 bootloader_api = "0.11.15"
 lazy_static = { version = "1.5", features = ["spin_no_std"] }
 libbaremetal-unifont = "0.1.0"
+mbrman = { version = "0.6.1", default-features = false, optional = true }
+gptman = { version = "3.1.1", default-features = false, optional = true }
+ntfs = { version = "0.4.0", default-features = false, optional = true }
+ext4-view = { version = "0.9.3", optional = true }
+fatfs = { version = "0.3.6", default-features = false, features = ["alloc", "core_io"], optional = true }
 pc-keyboard = "0.9.0"
 pic8259 = "0.11.0"
 spin = "0.10.0"
 uart_16550 = "0.6.0"
 x86_64 = "0.15.4"
+
+[features]
+default = []
+disk-shell = ["dep:ntfs", "dep:ext4-view"]
+disk-gpt = ["dep:gptman"]
+disk-mbr = ["dep:mbrman"]
+disk-fat = ["dep:fatfs"]
 
 [build-dependencies]
 bootloader = "0.11.15"

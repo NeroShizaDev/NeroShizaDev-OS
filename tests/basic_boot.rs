@@ -1,21 +1,21 @@
 #![no_std]
 #![no_main]
 #![feature(custom_test_frameworks)]
-#![test_runner(blog_os::test_runner)]
+#![test_runner(neroshiza_dev_os::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
-use blog_os::println;
 use core::panic::PanicInfo;
+use neroshiza_dev_os::println;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
     test_main();
-    blog_os::hlt_loop();
+    neroshiza_dev_os::hlt_loop();
 }
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    blog_os::test_panic_handler(info)
+    neroshiza_dev_os::test_panic_handler(info)
 }
 
 #[test_case]

@@ -65,7 +65,7 @@ impl VoodooEngine {
         self.cellular_mode = mode;
         let mode_str = match mode {
             AutomatonMode::ConwayB3S23 => "Conway 1D-адаптация B2/S12",
-            AutomatonMode::HighLife => "HighLife 1D (аналог Conway; 2D — TODO)",
+            AutomatonMode::HighLife => "HighLife 1D (аналог Conway; 2D вне этой сборки)",
             AutomatonMode::Seeds => "Seeds B2/S (хаос)",
             AutomatonMode::Rule90 => "Rule90 (треугольник Серпинского, детерминирован)",
             AutomatonMode::Diffusion => "Diffusion (сглаживание)",

@@ -40,8 +40,8 @@ pub mod vga;
 #[path = "../fonts/mod.rs"]
 pub mod fonts;
 
-/// crate::shell = apps/shell/shell.rs (глобальное состояние шелла, ISR-хуки)
-#[path = "../apps/shell/shell.rs"]
+/// crate::shell = apps/shell/mod.rs (state + commands + runtime + input hooks)
+#[path = "../apps/shell/mod.rs"]
 pub mod shell;
 
 /// crate::logo = apps/shell/logo.rs (загрузочный логотип)
@@ -148,7 +148,7 @@ pub fn init() {
     // Master PIC: 0b11111100 → IRQ0 (таймер) и IRQ1 (клавиатура) активны.
     // Slave PIC:  0xFF       → все заглушены (slave нам не нужны).
     unsafe { interrupts::PICS.lock().write_masks(0b11111100, 0b11111111) };
-    apps::fpu::init();
+    apps::kernel_hooks::init_for_kernel();
 }
 
 pub fn hlt_loop() -> ! {

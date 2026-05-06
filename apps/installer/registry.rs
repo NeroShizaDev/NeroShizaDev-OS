@@ -9,6 +9,9 @@
 
 use super::header::NhsManifest;
 use super::slots::MAX_SLOTS;
+use crate::apps::activity::AppKind;
+
+pub const FLAG_REGISTRY_BUILTIN: u32 = 1 << 31;
 
 /// Одна запись = одно установленное приложение.
 #[derive(Clone, Copy)]
@@ -56,6 +59,18 @@ impl InstalledApp {
     pub fn version_tuple(&self) -> (u8, u8, u8) {
         (self.version[0], self.version[1], self.version[2])
     }
+
+    pub fn is_builtin(&self) -> bool {
+        self.flags & FLAG_REGISTRY_BUILTIN != 0
+    }
+
+    pub fn launch_kind(&self) -> AppKind {
+        if self.is_builtin() {
+            AppKind::from_registry_id(self.entry_point as u8).unwrap_or(AppKind::Nhs)
+        } else {
+            AppKind::Nhs
+        }
+    }
 }
 
 // ── Глобальный реестр (static, no heap) ──────────────────────
@@ -94,6 +109,32 @@ pub fn register(
         r.flags = flags;
         r.lump_count = lump_count;
         r.entry_point = entry_point;
+        true
+    }
+}
+
+pub fn register_builtin(slot: usize, spec: &super::catalog::BuiltinAppSpec, size: u32) -> bool {
+    if slot >= MAX_SLOTS {
+        return false;
+    }
+
+    unsafe {
+        if REGISTRY[slot].occupied {
+            return false;
+        }
+
+        let r = &mut REGISTRY[slot];
+        r.occupied = true;
+        r.slot_index = slot as u8;
+        copy_str_into(&mut r.name, spec.name);
+        copy_str_into(&mut r.author, spec.author);
+        r.version = [spec.version[0], spec.version[1], spec.version[2], 0];
+        r.icon_char = spec.name.as_bytes().first().copied().unwrap_or(b'?');
+        r.category = spec.category;
+        r.installed_size = size;
+        r.flags = FLAG_REGISTRY_BUILTIN;
+        r.lump_count = 0;
+        r.entry_point = spec.kind as u32;
         true
     }
 }
@@ -140,6 +181,27 @@ pub fn get(slot: usize) -> Option<&'static InstalledApp> {
     }
 }
 
+/// Получить только реально установленный NHS-пакет.
+/// Встроенные builtin-записи для launcher-секции не возвращаются.
+pub fn get_user(slot: usize) -> Option<&'static InstalledApp> {
+    match get(slot) {
+        Some(app) if !app.is_builtin() => Some(app),
+        _ => None,
+    }
+}
+
+pub fn user_installed_count() -> usize {
+    unsafe {
+        let mut count = 0;
+        for i in 0..MAX_SLOTS {
+            if REGISTRY[i].occupied && !REGISTRY[i].is_builtin() {
+                count += 1;
+            }
+        }
+        count
+    }
+}
+
 /// Найти по имени. Возвращает индекс слота.
 pub fn find_by_name(name: &[u8]) -> Option<usize> {
     unsafe {
@@ -169,6 +231,16 @@ pub fn for_each(mut f: impl FnMut(usize, &InstalledApp)) {
     }
 }
 
+pub fn for_each_user(mut f: impl FnMut(usize, &InstalledApp)) {
+    unsafe {
+        for i in 0..MAX_SLOTS {
+            if REGISTRY[i].occupied && !REGISTRY[i].is_builtin() {
+                f(i, &REGISTRY[i]);
+            }
+        }
+    }
+}
+
 /// Возвращает все записи как массив + количество.
 /// Для использования в launcher.
 pub fn list() -> ([Option<(usize, InstalledApp)>; MAX_SLOTS], usize) {
@@ -183,4 +255,11 @@ pub fn list() -> ([Option<(usize, InstalledApp)>; MAX_SLOTS], usize) {
         }
     }
     (out, count)
+}
+
+fn copy_str_into<const N: usize>(out: &mut [u8; N], value: &str) {
+    out.fill(0);
+    let bytes = value.as_bytes();
+    let len = bytes.len().min(N);
+    out[..len].copy_from_slice(&bytes[..len]);
 }

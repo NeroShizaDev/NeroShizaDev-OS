@@ -1,5 +1,6 @@
 /target
 tools/image_builder/target/
+tools/vdi_inspector/target/
 **/*.rs.bk
 
 .vscode

@@ -55,8 +55,12 @@ where
         }
 
         let virtual_address_offset = match elf_file.header.pt2.type_().as_type() {
-            header::Type::None => unimplemented!(),
-            header::Type::Relocatable => unimplemented!(),
+            header::Type::None => {
+                return Err("unsupported ELF type: None");
+            }
+            header::Type::Relocatable => {
+                return Err("unsupported ELF type: Relocatable");
+            }
             header::Type::Executable => match kernel.config.mappings.kernel_base {
                 Mapping::Dynamic => VirtualAddressOffset::zero(),
                 _ => {
@@ -82,8 +86,12 @@ where
                     }
                 }
             }
-            header::Type::Core => unimplemented!(),
-            header::Type::ProcessorSpecific(_) => unimplemented!(),
+            header::Type::Core => {
+                return Err("unsupported ELF type: Core");
+            }
+            header::Type::ProcessorSpecific(_) => {
+                return Err("unsupported ELF type: ProcessorSpecific");
+            }
         };
         log::info!(
             "virtual_address_offset: {:#x}",
@@ -674,7 +682,10 @@ where
                     self.copy_to(addr, &value.to_ne_bytes());
                 }
             }
-            ty => unimplemented!("relocation type {:x} not supported", ty),
+            ty => {
+                log::error!("unsupported relocation type {:x}", ty);
+                return Err("unsupported relocation type");
+            }
         }
 
         Ok(())

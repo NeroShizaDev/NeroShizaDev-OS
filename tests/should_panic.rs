@@ -1,8 +1,8 @@
 #![no_std]
 #![no_main]
 
-use blog_os::{QemuExitCode, exit_qemu, serial_print, serial_println};
 use core::panic::PanicInfo;
+use neroshiza_dev_os::{QemuExitCode, exit_qemu, serial_print, serial_println};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {

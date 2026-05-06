@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(custom_test_frameworks)]
-#![test_runner(blog_os::test_runner)]
+#![test_runner(neroshiza_dev_os::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
 use core::panic::PanicInfo;
@@ -40,7 +40,26 @@ fn debugcon_byte(byte: u8) {
     }
 }
 
+#[inline(always)]
+fn raw_serial_byte(byte: u8) {
+    unsafe {
+        let mut lsr = Port::<u8>::new(0x3F8 + 5);
+        while lsr.read() & 0x20 == 0 {}
+        Port::<u8>::new(0x3F8).write(byte);
+    }
+}
+
+#[inline(always)]
+fn raw_serial_str(s: &str) {
+    for &byte in s.as_bytes() {
+        raw_serial_byte(byte);
+    }
+}
+
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
+    debugcon_byte(b'0');
+    raw_serial_str("[RAW] kernel_main:0 entry\r\n");
+
     // ============================================================
     // АБСОЛЮТНО ПЕРВАЯ ИНСТРУКЦИЯ ЯДРА — диагностика на реальном железе.
     // Без serial мы слепые: нужен максимально ранний маркер того, что ядро
@@ -78,8 +97,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
     }
 
+    debugcon_byte(b'1');
+    raw_serial_str("[RAW] kernel_main:1 marker done\r\n");
+
     debugcon_byte(b'A');
-    blog_os::serial_println!("[ЯДРО] kernel_main entered");
+    raw_serial_str("[RAW] kernel_main:A before formatted serial\r\n");
+    neroshiza_dev_os::serial_println!("[ЯДРО] kernel_main entered");
+    debugcon_byte(b'a');
+    raw_serial_str("[RAW] kernel_main:a after formatted serial\r\n");
 
     // ============================================================
     // ШАГ 0: GDT → IDT → PICS → FPU — ДО ЛЮБЫХ ОБРАЩЕНИЙ К СТРАНИЦАМ!
@@ -87,9 +112,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // map_vga_memory() модифицирует page tables → тоже.
     // Без IDT любое исключение = double fault = triple fault = ребут.
     // ============================================================
-    blog_os::init();
+    debugcon_byte(b'2');
+    raw_serial_str("[RAW] kernel_main:2 before init\r\n");
+    neroshiza_dev_os::init();
+    debugcon_byte(b'3');
+    raw_serial_str("[RAW] kernel_main:3 after init\r\n");
     debugcon_byte(b'B');
-    blog_os::serial_println!("[ЯДРО] cpu init done");
+    neroshiza_dev_os::serial_println!("[ЯДРО] cpu init done");
 
     // ============================================================
     // После поднятия IDT можно безопасно трогать framebuffer bootloader'а:
@@ -102,7 +131,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             let buf = fb.buffer_mut();
             let addr = buf.as_mut_ptr() as usize;
             unsafe {
-                blog_os::fb_buffer::init(
+                neroshiza_dev_os::fb_buffer::init(
                     addr,
                     info.width,
                     info.height,
@@ -112,7 +141,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 );
             }
             debugcon_byte(b'C');
-            blog_os::serial_println!(
+            neroshiza_dev_os::serial_println!(
                 "[ЯДРО] framebuffer init done: {}x{} stride={} bpp={} len={}",
                 info.width,
                 info.height,
@@ -122,7 +151,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             );
         } else {
             debugcon_byte(b'N');
-            blog_os::serial_println!("[ЯДРО] framebuffer absent");
+            neroshiza_dev_os::serial_println!("[ЯДРО] framebuffer absent");
         }
     }
 
@@ -173,14 +202,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     fb_stripe!(boot_info, 0, 0x00, 0x00, 0xFF); // полоска 0 (синяя) — kernel_main достигнут
 
-    // ПЕРВЫМ ДЕЛОМ — инициализируем кучу (bump-аллокатор в BSS).
-    blog_os::apps::games::doom::stubs::init_heap();
+    // ПЕРВЫМ ДЕЛОМ — поднимаем app-side рантайм, который нужен ядру
+    // во время бута (FPU + idempotent heap для app-демо).
+    neroshiza_dev_os::apps::kernel_hooks::init_for_kernel();
 
     fb_stripe!(boot_info, 1, 0x00, 0xFF, 0x00); // полоска 1 (зелёная) — heap OK
 
     fb_stripe!(boot_info, 2, 0xFF, 0x55, 0x00); // полоска 2 (оранжевая) — init() уже был выше
-    blog_os::serial_println!("[ЯДРО] Куча инициализирована");
-    blog_os::trace::record("heap initialized");
+    neroshiza_dev_os::serial_println!("[ЯДРО] Куча инициализирована");
+    neroshiza_dev_os::trace::record("heap initialized");
 
     // ============================================================
     // ФАЗА 0: Маппинг VGA-памяти и сброс в текстовый режим
@@ -200,17 +230,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     fb_stripe!(boot_info, 3, 0xFF, 0x00, 0x00); // полоска 3 (красная) — phys_offset прочитан
 
     let phys_offset_addr = VirtAddr::new(phys_offset);
-    let _mapper = unsafe { blog_os::memory::init(phys_offset_addr) };
+    let _mapper = unsafe { neroshiza_dev_os::memory::init(phys_offset_addr) };
 
     fb_stripe!(boot_info, 4, 0x00, 0xFF, 0xFF); // полоска 4 (жёлтая) — mapper OK
 
-    let _frame_allocator =
-        unsafe { blog_os::memory::BootInfoFrameAllocator::init(&boot_info.memory_regions) };
+    let _frame_allocator = unsafe {
+        neroshiza_dev_os::memory::BootInfoFrameAllocator::init(&boot_info.memory_regions)
+    };
 
     fb_stripe!(boot_info, 5, 0xFF, 0xFF, 0xFF); // полоска 5 (белая) — allocator OK
 
-    blog_os::serial_println!("[ЯДРО] Фаза 0: legacy VGA path skipped, framebuffer only");
-    blog_os::trace::record("legacy vga path skipped; framebuffer only");
+    neroshiza_dev_os::serial_println!("[ЯДРО] Фаза 0: legacy VGA path skipped, framebuffer only");
+    neroshiza_dev_os::trace::record("legacy vga path skipped; framebuffer only");
 
     // ============================================================
     // ФАЗА 1: Ранняя инициализация & Линия жизни
@@ -218,40 +249,52 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // vga_hw (используется font-загрузчиком), vga_buffer, logo.
     // Цель: видеть вывод даже если следующие фазы упадут.
     // ============================================================
-    blog_os::trace::record("phase1 clear_screen start");
-    blog_os::fb_buffer::clear_screen();
-    blog_os::trace::record("phase1 clear_screen done");
-    blog_os::trace::record("phase1 localized header start");
-    blog_os::locale::print_localized_line(
-        blog_os::kernel_messages::current(blog_os::kernel_messages::UiText::SystemCheckHeader),
+    neroshiza_dev_os::trace::record("phase1 clear_screen start");
+    neroshiza_dev_os::fb_buffer::clear_screen();
+    neroshiza_dev_os::trace::record("phase1 clear_screen done");
+    neroshiza_dev_os::trace::record("phase1 localized header start");
+    neroshiza_dev_os::locale::print_localized_line(
+        neroshiza_dev_os::kernel_messages::current(
+            neroshiza_dev_os::kernel_messages::UiText::SystemCheckHeader,
+        ),
         0x0B,
     );
-    blog_os::trace::record("phase1 localized header done");
-    match blog_os::locale::get_locale() {
-        blog_os::kernel_messages::Locale::RuRu => blog_os::locale::print_localized_fmt(
-            0x0E,
-            format_args!("[Фаза 1] Буфер кадра: активен"),
-        ),
-        blog_os::kernel_messages::Locale::EnUs => blog_os::locale::print_localized_fmt(
-            0x0E,
-            format_args!("[Phase 1] framebuffer: active"),
-        ),
-        blog_os::kernel_messages::Locale::ArEg => blog_os::locale::print_localized_fmt(
-            0x0E,
-            format_args!("[المرحلة 1] framebuffer: active"),
-        ),
+    neroshiza_dev_os::trace::record("phase1 localized header done");
+    match neroshiza_dev_os::locale::get_locale() {
+        neroshiza_dev_os::kernel_messages::Locale::RuRu => {
+            neroshiza_dev_os::locale::print_localized_fmt(
+                0x0E,
+                format_args!("[Фаза 1] Буфер кадра: активен"),
+            )
+        }
+        neroshiza_dev_os::kernel_messages::Locale::EnUs => {
+            neroshiza_dev_os::locale::print_localized_fmt(
+                0x0E,
+                format_args!("[Phase 1] framebuffer: active"),
+            )
+        }
+        neroshiza_dev_os::kernel_messages::Locale::ArEg => {
+            neroshiza_dev_os::locale::print_localized_fmt(
+                0x0E,
+                format_args!("[المرحلة 1] framebuffer: active"),
+            )
+        }
     }
-    blog_os::serial_println!("[ЯДРО] Фаза 1: framebuffer path active, legacy VGA detect skipped");
-    blog_os::trace::record("framebuffer path active");
+    neroshiza_dev_os::serial_println!(
+        "[ЯДРО] Фаза 1: framebuffer path active, legacy VGA detect skipped"
+    );
+    neroshiza_dev_os::trace::record("framebuffer path active");
 
     // ============================================================
     // ФАЗА 2: Архитектура CPU — уже инициализирована в ШАГ 0
     // GDT + IDT + PICS + FPU подняты ДО memory::init и map_vga_memory.
     // ============================================================
-    blog_os::serial_println!("[ЯДРО] Фаза 2: GDT + IDT + PICS + FPU готовы (подняты в шаг 0)");
-    blog_os::trace::record("gdt idt pics fpu ready");
-    blog_os::locale::print_boot_status(blog_os::kernel_messages::current(
-        blog_os::kernel_messages::UiText::Phase2CpuOk,
+    neroshiza_dev_os::serial_println!(
+        "[ЯДРО] Фаза 2: GDT + IDT + PICS + FPU готовы (подняты в шаг 0)"
+    );
+    neroshiza_dev_os::trace::record("gdt idt pics fpu ready");
+    neroshiza_dev_os::locale::print_boot_status(neroshiza_dev_os::kernel_messages::current(
+        neroshiza_dev_os::kernel_messages::UiText::Phase2CpuOk,
     ));
 
     // ============================================================
@@ -259,32 +302,31 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Физическая память и куча инициализированы загрузчиком (bootimage).
     // При необходимости здесь будет memory::init(physical_offset).
     // ============================================================
-    blog_os::locale::print_boot_status(blog_os::kernel_messages::current(
-        blog_os::kernel_messages::UiText::Phase3MemoryOk,
+    neroshiza_dev_os::locale::print_boot_status(neroshiza_dev_os::kernel_messages::current(
+        neroshiza_dev_os::kernel_messages::UiText::Phase3MemoryOk,
     ));
-    blog_os::serial_println!("[ЯДРО] Фаза 3: Память ОК");
+    neroshiza_dev_os::serial_println!("[ЯДРО] Фаза 3: Память ОК");
 
     // ============================================================
     // ФАЗА 4: Время и Энтропия
     // Сначала validator::probe_cmos() (уже внутри display_status),
     // затем чтение времени, температура CPU, RNG.
     // ============================================================
-    blog_os::apps::rtc::display_status();
-    blog_os::apps::rtc::display_thermal();
-    let risk = blog_os::validator::probe_pre_freeze_risks();
-    blog_os::validator::display_pre_freeze_risks(&risk);
-    blog_os::trace::record("rtc validator phase done");
+    neroshiza_dev_os::apps::kernel_hooks::display_boot_time_and_thermal();
+    let risk = neroshiza_dev_os::validator::probe_pre_freeze_risks();
+    neroshiza_dev_os::validator::display_pre_freeze_risks(&risk);
+    neroshiza_dev_os::trace::record("rtc validator phase done");
 
-    let rng_ok = blog_os::apps::rng::is_supported();
-    blog_os::serial_println!(
+    let rng_ok = neroshiza_dev_os::apps::kernel_hooks::rng_supported();
+    neroshiza_dev_os::serial_println!(
         "[ЯДРО] Фаза 4: RDRAND {}",
         if rng_ok { "ВКЛ" } else { "ВЫКЛ" }
     );
-    blog_os::locale::print_localized_line(
-        blog_os::kernel_messages::current(if rng_ok {
-            blog_os::kernel_messages::UiText::Phase4RngOn
+    neroshiza_dev_os::locale::print_localized_line(
+        neroshiza_dev_os::kernel_messages::current(if rng_ok {
+            neroshiza_dev_os::kernel_messages::UiText::Phase4RngOn
         } else {
-            blog_os::kernel_messages::UiText::Phase4RngOff
+            neroshiza_dev_os::kernel_messages::UiText::Phase4RngOff
         }),
         0x0E,
     );
@@ -293,21 +335,23 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // ФАЗА 5: Железо и Ввод
     // PS/2 probe → speaker probe → OK-сигнал.
     // ============================================================
-    let ps2_ok = blog_os::validator::probe_ps2();
-    blog_os::serial_println!("[ЯДРО] Фаза 5: PS/2 {}", if ps2_ok { "OK" } else { "NO" });
-    blog_os::trace::record("ps2 probe complete");
-    blog_os::validator::display_ps2_probe();
+    let ps2_ok = neroshiza_dev_os::validator::probe_ps2();
+    neroshiza_dev_os::serial_println!("[ЯДРО] Фаза 5: PS/2 {}", if ps2_ok { "OK" } else { "NO" });
+    neroshiza_dev_os::trace::record("ps2 probe complete");
+    neroshiza_dev_os::validator::display_ps2_probe();
 
-    if blog_os::validator::probe_speaker() {
-        blog_os::serial_println!("[ЯДРО] Фаза 5: Спикер ОК");
-        blog_os::locale::print_boot_status(blog_os::kernel_messages::current(
-            blog_os::kernel_messages::UiText::Phase5SpeakerOk,
+    if neroshiza_dev_os::validator::probe_speaker() {
+        neroshiza_dev_os::serial_println!("[ЯДРО] Фаза 5: Спикер ОК");
+        neroshiza_dev_os::locale::print_boot_status(neroshiza_dev_os::kernel_messages::current(
+            neroshiza_dev_os::kernel_messages::UiText::Phase5SpeakerOk,
         ));
         boot_beep();
     } else {
-        blog_os::serial_println!("[ЯДРО] Фаза 5: Спикер НЕ НАЙДЕН");
-        blog_os::locale::print_localized_line(
-            blog_os::kernel_messages::current(blog_os::kernel_messages::UiText::Phase5SpeakerFail),
+        neroshiza_dev_os::serial_println!("[ЯДРО] Фаза 5: Спикер НЕ НАЙДЕН");
+        neroshiza_dev_os::locale::print_localized_line(
+            neroshiza_dev_os::kernel_messages::current(
+                neroshiza_dev_os::kernel_messages::UiText::Phase5SpeakerFail,
+            ),
             0x0E,
         );
     }
@@ -316,10 +360,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // ФАЗА 6: Мультиязычность и Рендеринг текста
     // Шрифты → локаль → Unicode-подсистема → баннер OS.
     // ============================================================
-    blog_os::locale::draw_locale_badge();
-    blog_os::serial_println!("[ЯДРО] Фаза 6: Шрифт + локаль готовы");
-    blog_os::trace::record("font + locale ready");
-    blog_os::locale::print_phase6_ok();
+    neroshiza_dev_os::locale::draw_locale_badge();
+    neroshiza_dev_os::serial_println!("[ЯДРО] Фаза 6: Шрифт + локаль готовы");
+    neroshiza_dev_os::trace::record("font + locale ready");
+    neroshiza_dev_os::locale::print_phase6_ok();
     print_startup_banner();
 
     // ============================================================
@@ -327,15 +371,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Все демо-приложения запускаются через APPS меню.
     // ============================================================
     print_phase7_ready_line();
-    blog_os::trace::record("phase7 logo start");
-    blog_os::logo::show_boot_logo();
-    blog_os::trace::record("phase7 logo done");
-    blog_os::shell::show_shell_prompt();
-    blog_os::trace::record("shell prompt drawn");
+    neroshiza_dev_os::trace::record("phase7 logo start");
+    neroshiza_dev_os::logo::show_boot_logo();
+    neroshiza_dev_os::trace::record("phase7 logo done");
+    neroshiza_dev_os::shell::show_shell_prompt();
+    neroshiza_dev_os::trace::record("shell prompt drawn");
 
-    let unicode_report = blog_os::vga_unicode::init_runtime_after_shell();
-    blog_os::trace::record("unicode runtime init after shell");
-    blog_os::serial_println!(
+    let unicode_report = neroshiza_dev_os::vga_unicode::init_runtime_after_shell();
+    neroshiza_dev_os::trace::record("unicode runtime init after shell");
+    neroshiza_dev_os::serial_println!(
         "[ЯДРО] Unicode runtime init after shell complete: mode={:?} ready={}/{} cyr={} ar={}",
         unicode_report.mode,
         unicode_report.ready,
@@ -343,28 +387,37 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if unicode_report.cyrillic_ready { 1 } else { 0 },
         if unicode_report.arabic_ready { 1 } else { 0 }
     );
-    match blog_os::locale::get_locale() {
-        blog_os::kernel_messages::Locale::RuRu => {
-            blog_os::locale::print_localized_line("[Фаза 8] Юникод прогружен после шелла", 0x0A)
+    match neroshiza_dev_os::locale::get_locale() {
+        neroshiza_dev_os::kernel_messages::Locale::RuRu => {
+            neroshiza_dev_os::locale::print_localized_line(
+                "[Фаза 8] Юникод прогружен после шелла",
+                0x0A,
+            )
         }
-        blog_os::kernel_messages::Locale::EnUs => {
-            blog_os::locale::print_localized_line("[Phase 8] Unicode loaded after shell", 0x0A)
+        neroshiza_dev_os::kernel_messages::Locale::EnUs => {
+            neroshiza_dev_os::locale::print_localized_line(
+                "[Phase 8] Unicode loaded after shell",
+                0x0A,
+            )
         }
-        blog_os::kernel_messages::Locale::ArEg => {
-            blog_os::locale::print_localized_line("[المرحلة 8] تم تحميل Unicode بعد shell", 0x0A)
+        neroshiza_dev_os::kernel_messages::Locale::ArEg => {
+            neroshiza_dev_os::locale::print_localized_line(
+                "[المرحلة 8] تم تحميل Unicode بعد shell",
+                0x0A,
+            )
         }
     }
-    blog_os::shell::show_shell_prompt();
+    neroshiza_dev_os::shell::show_shell_prompt();
 
-    blog_os::serial_println!("[ЯДРО] Фаза 7: Шелл готов, включаем прерывания");
+    neroshiza_dev_os::serial_println!("[ЯДРО] Фаза 7: Шелл готов, включаем прерывания");
     // Разрешаем сканирование PS/2 клавиатуры перед включением прерываний.
     // QEMU включает сканирование по умолчанию, VirtualBox оставляет порт
     // в отключённом состоянии. Вызываем здесь — после всей инициализации,
     // перед sti, чтобы избежать раннего тройного сброса в VirtualBox.
-    unsafe { blog_os::ps2::init() };
+    unsafe { neroshiza_dev_os::ps2::init() };
     x86_64::instructions::interrupts::enable();
-    blog_os::trace::record("interrupts enabled");
-    blog_os::hlt_loop()
+    neroshiza_dev_os::trace::record("interrupts enabled");
+    neroshiza_dev_os::hlt_loop()
 }
 
 // ================================================================
@@ -372,84 +425,80 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 // 880 Гц (A5), ~200 мс через busy-wait на порту 0x80.
 // ================================================================
 fn boot_beep() {
-    unsafe {
-        blog_os::apps::beeper::play(880);
-        // Задержка ~200 мс: порт 0x80 (POST-диагностический) ≈ 1 мкс/чтение
-        let mut p: Port<u8> = Port::new(0x80);
-        for _ in 0u32..200_000 {
-            core::hint::black_box(p.read());
-        }
-        blog_os::apps::beeper::stop();
-    }
+    neroshiza_dev_os::apps::kernel_hooks::play_boot_beep();
 }
 
 // ================================================================
 // Баннер ОС с Unicode-статистикой (Фаза 6)
 // ================================================================
 fn print_startup_banner() {
-    blog_os::locale::print_localized_line(
-        blog_os::kernel_messages::current(blog_os::kernel_messages::UiText::BootBannerTitle),
+    neroshiza_dev_os::locale::print_localized_line(
+        neroshiza_dev_os::kernel_messages::current(
+            neroshiza_dev_os::kernel_messages::UiText::BootBannerTitle,
+        ),
         0x0E,
     );
-    blog_os::locale::print_localized_line(
-        blog_os::kernel_messages::current(blog_os::kernel_messages::UiText::BootBannerUnicode),
+    neroshiza_dev_os::locale::print_localized_line(
+        neroshiza_dev_os::kernel_messages::current(
+            neroshiza_dev_os::kernel_messages::UiText::BootBannerUnicode,
+        ),
         0x0E,
     );
-    match blog_os::locale::get_locale() {
-        blog_os::kernel_messages::Locale::RuRu => {
-            blog_os::locale::print_localized_fmt(
+    match neroshiza_dev_os::locale::get_locale() {
+        neroshiza_dev_os::kernel_messages::Locale::RuRu => {
+            neroshiza_dev_os::locale::print_localized_fmt(
                 0x0E,
                 format_args!(
                     "Блоки: {} | Скрипты: {} | Символы: {}",
-                    blog_os::unicode_blocks::block_count(),
-                    blog_os::unicode_scripts::script_count(),
-                    blog_os::unicode_categories::total_defined_chars(),
+                    neroshiza_dev_os::unicode_blocks::block_count(),
+                    neroshiza_dev_os::unicode_scripts::script_count(),
+                    neroshiza_dev_os::unicode_categories::total_defined_chars(),
                 ),
             );
-            blog_os::locale::print_localized_fmt(
+            neroshiza_dev_os::locale::print_localized_fmt(
                 0x0E,
                 format_args!(
                     "Словарь: {} интентов ({} байт)",
-                    blog_os::unicode::dict_size(),
-                    blog_os::unicode::dict_bytes()
+                    neroshiza_dev_os::shell::shell_dictionary_size(),
+                    neroshiza_dev_os::shell::shell_dictionary_bytes()
                 ),
             );
         }
-        blog_os::kernel_messages::Locale::EnUs => {
-            blog_os::locale::print_localized_fmt(
+        neroshiza_dev_os::kernel_messages::Locale::EnUs => {
+            neroshiza_dev_os::locale::print_localized_fmt(
                 0x0E,
                 format_args!(
                     "Blocks: {} | Scripts: {} | Chars: {}",
-                    blog_os::unicode_blocks::block_count(),
-                    blog_os::unicode_scripts::script_count(),
-                    blog_os::unicode_categories::total_defined_chars()
+                    neroshiza_dev_os::unicode_blocks::block_count(),
+                    neroshiza_dev_os::unicode_scripts::script_count(),
+                    neroshiza_dev_os::unicode_categories::total_defined_chars()
                 ),
             );
-            blog_os::locale::print_localized_fmt(
+            neroshiza_dev_os::locale::print_localized_fmt(
                 0x0E,
                 format_args!(
                     "Dictionary: {} intents ({} bytes)",
-                    blog_os::unicode::dict_size(),
-                    blog_os::unicode::dict_bytes()
+                    neroshiza_dev_os::shell::shell_dictionary_size(),
+                    neroshiza_dev_os::shell::shell_dictionary_bytes()
                 ),
             );
         }
-        blog_os::kernel_messages::Locale::ArEg => {
-            blog_os::locale::print_localized_fmt(
+        neroshiza_dev_os::kernel_messages::Locale::ArEg => {
+            neroshiza_dev_os::locale::print_localized_fmt(
                 0x0E,
                 format_args!(
                     "الكتل: {} | الخطوط: {} | الرموز: {}",
-                    blog_os::unicode_blocks::block_count(),
-                    blog_os::unicode_scripts::script_count(),
-                    blog_os::unicode_categories::total_defined_chars(),
+                    neroshiza_dev_os::unicode_blocks::block_count(),
+                    neroshiza_dev_os::unicode_scripts::script_count(),
+                    neroshiza_dev_os::unicode_categories::total_defined_chars(),
                 ),
             );
-            blog_os::locale::print_localized_fmt(
+            neroshiza_dev_os::locale::print_localized_fmt(
                 0x0E,
                 format_args!(
                     "القاموس: {} أوامر ({} بايت)",
-                    blog_os::unicode::dict_size(),
-                    blog_os::unicode::dict_bytes()
+                    neroshiza_dev_os::shell::shell_dictionary_size(),
+                    neroshiza_dev_os::shell::shell_dictionary_bytes()
                 ),
             );
         }
@@ -457,17 +506,19 @@ fn print_startup_banner() {
 }
 
 fn print_phase7_ready_line() {
-    blog_os::fb_buffer::set_color(blog_os::fb_buffer::ColorCode::new(
-        blog_os::fb_buffer::Color::LightGreen,
-        blog_os::fb_buffer::Color::Black,
+    neroshiza_dev_os::fb_buffer::set_color(neroshiza_dev_os::fb_buffer::ColorCode::new(
+        neroshiza_dev_os::fb_buffer::Color::LightGreen,
+        neroshiza_dev_os::fb_buffer::Color::Black,
     ));
-    blog_os::println!(
+    neroshiza_dev_os::println!(
         "{}",
-        blog_os::kernel_messages::current(blog_os::kernel_messages::UiText::Phase7ShellReady)
+        neroshiza_dev_os::kernel_messages::current(
+            neroshiza_dev_os::kernel_messages::UiText::Phase7ShellReady
+        )
     );
-    blog_os::fb_buffer::set_color(blog_os::fb_buffer::ColorCode::new(
-        blog_os::fb_buffer::Color::Yellow,
-        blog_os::fb_buffer::Color::Black,
+    neroshiza_dev_os::fb_buffer::set_color(neroshiza_dev_os::fb_buffer::ColorCode::new(
+        neroshiza_dev_os::fb_buffer::Color::Yellow,
+        neroshiza_dev_os::fb_buffer::Color::Black,
     ));
 }
 
@@ -476,11 +527,13 @@ fn print_phase7_ready_line() {
 // ================================================================
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    blog_os::serial_println!("[ЯДРО] ПАНИКА: {}", info);
-    blog_os::trace::record_fatal("panic handler entered");
+    neroshiza_dev_os::serial_println!("[ЯДРО] ПАНИКА: {}", info);
+    neroshiza_dev_os::trace::record_fatal("panic handler entered");
     // Рисуем аварийный экран на VGA
     unsafe {
-        blog_os::locale::render_panic_screen(blog_os::kernel_messages::KernelEvent::Panic);
+        neroshiza_dev_os::locale::render_panic_screen(
+            neroshiza_dev_os::kernel_messages::KernelEvent::Panic,
+        );
         // Текст паники на строке 14 (truncate до 72 символов — ширина рамки)
         {
             struct PanicBuf {
@@ -506,21 +559,31 @@ fn panic(info: &PanicInfo) -> ! {
             let _ = core::fmt::write(&mut buf, format_args!("{}", info.message()));
             if buf.len > 0 {
                 if let Ok(msg) = core::str::from_utf8(&buf.data[..buf.len]) {
-                    blog_os::locale::write_panic_message(msg);
+                    neroshiza_dev_os::locale::write_panic_message(msg);
                 }
             }
         }
         // Если есть location — показать файл:строку на строке 13 (внутри рамки)
         if let Some(loc) = info.location() {
-            blog_os::locale::write_ascii_str_at_vga(loc.file(), 13, 2, 0x0F);
-            blog_os::locale::write_ascii_str_at_vga(":", 13, loc.file().len().min(68) + 2, 0x0F);
-            blog_os::locale::write_hex32_at_vga(loc.line(), 13, loc.file().len().min(68) + 3, 0x0D);
+            neroshiza_dev_os::locale::write_ascii_str_at_vga(loc.file(), 13, 2, 0x0F);
+            neroshiza_dev_os::locale::write_ascii_str_at_vga(
+                ":",
+                13,
+                loc.file().len().min(68) + 2,
+                0x0F,
+            );
+            neroshiza_dev_os::locale::write_hex32_at_vga(
+                loc.line(),
+                13,
+                loc.file().len().min(68) + 3,
+                0x0D,
+            );
         }
     }
-    blog_os::test_panic_handler(info)
+    neroshiza_dev_os::test_panic_handler(info)
 }
 
 #[test_case]
 fn test_println() {
-    blog_os::locale::print_localized_line("test_println output", 0x0F);
+    neroshiza_dev_os::locale::print_localized_line("test_println output", 0x0F);
 }

@@ -2,6 +2,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use lazy_static::lazy_static;
 use spin::Mutex;
 use uart_16550::{Config, Uart16550Tty, backend::PioBackend};
+use x86_64::instructions::port::Port;
 
 static SERIAL_EVENT_SEQ: AtomicU64 = AtomicU64::new(0);
 static LOG_MIN_LEVEL: AtomicU64 = AtomicU64::new(LogLevel::Trace as u64);
@@ -10,6 +11,15 @@ static LOG_FORMAT: AtomicU64 = AtomicU64::new(LogFormat::Canonical as u64);
 static LOG_DEDUP_ENABLED: AtomicU64 = AtomicU64::new(1);
 static LAST_EVENT_HASH: AtomicU64 = AtomicU64::new(0);
 static LAST_EVENT_SUPPRESSED: AtomicU64 = AtomicU64::new(0);
+
+#[inline(always)]
+fn raw_serial_probe(tag: u8) {
+    unsafe {
+        let mut lsr = Port::<u8>::new(0x3F8 + 5);
+        while lsr.read() & 0x20 == 0 {}
+        Port::<u8>::new(0x3F8).write(tag);
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
@@ -396,7 +406,7 @@ fn flush_suppressed_summary(serial: &mut Uart16550Tty<PioBackend>) {
         LogFormat::Canonical => {
             write!(
                 serial,
-                "[#{} tsc={:#x} irq=0 owner=Shell src=blog_os::serial:0 level=DEBUG subsys=LOG event=DEDUP] [LOG][DEDUP] suppressed={}\n",
+                "[#{} tsc={:#x} irq=0 owner=Shell src=neroshiza_dev_os::serial:0 level=DEBUG subsys=LOG event=DEDUP] [LOG][DEDUP] suppressed={}\n",
                 seq,
                 tsc,
                 suppressed
@@ -500,27 +510,37 @@ pub fn _println_ctx(module: &str, line: u32, args: ::core::fmt::Arguments) {
     use x86_64::instructions::interrupts;
 
     interrupts::without_interrupts(|| {
+        raw_serial_probe(b'0');
         let mut body = FixedBuf::<512>::new();
         body.write_fmt(args).expect("Formatting serial body failed");
         let body = body.as_str();
+        raw_serial_probe(b'1');
         let (level, subsys, event) = classify_body(body);
         if (level as u64) < LOG_MIN_LEVEL.load(Ordering::Acquire) || !subsys_enabled(subsys) {
+            raw_serial_probe(b'X');
             return;
         }
+        raw_serial_probe(b'2');
         let hash = event_hash(module, line, level, subsys, event, body);
         if dedup_enabled() && level <= LogLevel::Debug {
             let last_hash = LAST_EVENT_HASH.load(Ordering::Acquire);
             if last_hash == hash {
                 LAST_EVENT_SUPPRESSED.fetch_add(1, Ordering::AcqRel);
+                raw_serial_probe(b'D');
                 return;
             }
         }
+        raw_serial_probe(b'3');
         let seq = SERIAL_EVENT_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
         let tsc = read_tsc();
         let irq = if crate::irq_guard::is_in_irq() { 1 } else { 0 };
+        raw_serial_probe(b'4');
         let owner = input_owner_name();
+        raw_serial_probe(b'5');
         let mut serial = SERIAL1.lock();
+        raw_serial_probe(b'6');
         flush_suppressed_summary(&mut serial);
+        raw_serial_probe(b'7');
         write_event_line(
             &mut serial,
             seq,
@@ -534,6 +554,7 @@ pub fn _println_ctx(module: &str, line: u32, args: ::core::fmt::Arguments) {
             event,
             body,
         );
+        raw_serial_probe(b'8');
         LAST_EVENT_HASH.store(hash, Ordering::Release);
     });
 }

@@ -47,23 +47,23 @@ pub fn init(wad_data: &'static [u8]) {
 /// заблокированы, PIC EOI ещё не отправлен — используем прямой опрос PS/2
 /// (порт 0x60). VGA-регистры и 0xA0000 должны быть identity-mapped.
 pub fn run() {
-    // Mode 13h требует legacy VGA (0xA0000 identity-mapped).
-    // В UEFI-режиме (fb_buffer активен) legacy VGA недоступен — пропускаем.
-    if crate::fb_buffer::is_initialized() {
-        crate::serial_println!("[DOOM] Пропуск: Mode 13h недоступен в UEFI/framebuffer режиме");
-        return;
-    }
+    let framebuffer_mode = crate::fb_buffer::is_initialized();
     crate::serial_println!("[DOOM] Запуск");
     unsafe {
-        // Сохраняем ВСЕ 256 слотов шрифта plane 2 перед Mode 13h.
-        // chain-4 в Mode 13h перезапишет plane 2 данными огня — без этого
-        // box-drawing символы (0xBA..0xCD и т.п.) будут испорчены после выхода.
-        vga_graphics::save_font_plane();
-        crate::serial_println!("[DOOM] Переключение в Mode 13h...");
-        vga_graphics::set_mode_13h();
-        crate::serial_println!("[DOOM] Палитра огня...");
-        vga_graphics::set_fire_palette();
-        vga_graphics::clear_fb(0);
+        if framebuffer_mode {
+            crate::serial_println!("[DOOM] UEFI/framebuffer path active");
+            crate::fb_buffer::clear_screen();
+        } else {
+            // Сохраняем ВСЕ 256 слотов шрифта plane 2 перед Mode 13h.
+            // chain-4 в Mode 13h перезапишет plane 2 данными огня — без этого
+            // box-drawing символы (0xBA..0xCD и т.п.) будут испорчены после выхода.
+            vga_graphics::save_font_plane();
+            crate::serial_println!("[DOOM] Переключение в Mode 13h...");
+            vga_graphics::set_mode_13h();
+            crate::serial_println!("[DOOM] Палитра огня...");
+            vga_graphics::set_fire_palette();
+            vga_graphics::clear_fb(0);
+        }
         vga_graphics::fire_set_mode(vga_graphics::FireMode::Classic);
         vga_graphics::fire_init();
         crate::serial_println!(
@@ -172,7 +172,7 @@ pub fn run() {
 /// Выполняет 4 шага Ритуала Восстановления Mode 3 + кириллица + badge.
 pub fn on_destroy() {
     if crate::fb_buffer::is_initialized() {
-        // run() вернулся сразу в UEFI-режиме — ничего не запускалось, нечего восстанавливать
+        crate::serial_println!("[DOOM] on_destroy: framebuffer session ended");
         return;
     }
     crate::serial_println!("[DOOM] on_destroy: восстановление текстового режима");

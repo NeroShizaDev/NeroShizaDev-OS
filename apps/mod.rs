@@ -13,6 +13,7 @@ pub mod calculator;
 pub mod games;
 pub mod installer;
 pub mod jackal;
+pub mod kernel_hooks;
 pub mod launcher;
 pub mod locale_switcher;
 

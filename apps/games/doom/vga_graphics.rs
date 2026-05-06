@@ -45,47 +45,58 @@ static mut FPU_ENABLED: bool = false; // \\ — включает FPU-физик�
 
 // ─────────────────────────────────────────────────────────────
 // Палитра огня (37 уровней, значения VGA DAC 0..63)
+// Спектр намеренно многоцветный: синий -> зелёный -> оранжевый -> красный -> белый.
 // ─────────────────────────────────────────────────────────────
 
 static FIRE_PAL: [[u8; 3]; FIRE_LEVELS] = [
     [0x00, 0x00, 0x00], // 0
-    [0x07, 0x01, 0x01], // 1
-    [0x0B, 0x03, 0x01], // 2
-    [0x11, 0x03, 0x01], // 3
-    [0x15, 0x05, 0x01], // 4
-    [0x19, 0x07, 0x01], // 5
-    [0x1D, 0x07, 0x01], // 6
-    [0x23, 0x09, 0x01], // 7
-    [0x27, 0x0B, 0x01], // 8
-    [0x2B, 0x0F, 0x01], // 9
-    [0x2F, 0x11, 0x01], // 10
-    [0x31, 0x11, 0x01], // 11
-    [0x37, 0x13, 0x01], // 12
-    [0x37, 0x15, 0x01], // 13
-    [0x37, 0x15, 0x01], // 14
-    [0x35, 0x17, 0x01], // 15
-    [0x35, 0x17, 0x01], // 16
-    [0x35, 0x19, 0x03], // 17
-    [0x33, 0x1B, 0x03], // 18
-    [0x33, 0x1D, 0x03], // 19
-    [0x33, 0x1F, 0x03], // 20
-    [0x33, 0x21, 0x05], // 21
-    [0x31, 0x21, 0x05], // 22
-    [0x31, 0x23, 0x05], // 23
-    [0x31, 0x25, 0x07], // 24
-    [0x2F, 0x27, 0x07], // 25
-    [0x2F, 0x27, 0x07], // 26
-    [0x2F, 0x29, 0x09], // 27
-    [0x2F, 0x29, 0x09], // 28
-    [0x2F, 0x2B, 0x0B], // 29
-    [0x2D, 0x2B, 0x0B], // 30
-    [0x2D, 0x2D, 0x0B], // 31
-    [0x2D, 0x2D, 0x0D], // 32
-    [0x33, 0x33, 0x1B], // 33
-    [0x37, 0x37, 0x27], // 34
-    [0x3B, 0x3B, 0x31], // 35
+    [0x00, 0x00, 0x06], // 1
+    [0x00, 0x00, 0x0A], // 2
+    [0x00, 0x02, 0x10], // 3
+    [0x00, 0x04, 0x16], // 4
+    [0x00, 0x08, 0x1C], // 5
+    [0x00, 0x0C, 0x22], // 6
+    [0x00, 0x10, 0x28], // 7
+    [0x00, 0x14, 0x2E], // 8
+    [0x00, 0x18, 0x22], // 9
+    [0x00, 0x1C, 0x1C], // 10
+    [0x00, 0x20, 0x18], // 11
+    [0x04, 0x24, 0x14], // 12
+    [0x08, 0x28, 0x10], // 13
+    [0x0C, 0x2C, 0x0C], // 14
+    [0x10, 0x30, 0x08], // 15
+    [0x16, 0x34, 0x04], // 16
+    [0x1C, 0x30, 0x00], // 17
+    [0x22, 0x2C, 0x00], // 18
+    [0x28, 0x28, 0x00], // 19
+    [0x30, 0x24, 0x00], // 20
+    [0x38, 0x20, 0x00], // 21
+    [0x3F, 0x1C, 0x00], // 22
+    [0x3F, 0x20, 0x00], // 23
+    [0x3F, 0x24, 0x00], // 24
+    [0x3F, 0x28, 0x00], // 25
+    [0x3F, 0x2C, 0x00], // 26
+    [0x3F, 0x20, 0x04], // 27
+    [0x3F, 0x18, 0x08], // 28
+    [0x3F, 0x12, 0x0C], // 29
+    [0x3F, 0x0C, 0x10], // 30
+    [0x3F, 0x08, 0x14], // 31
+    [0x3F, 0x10, 0x18], // 32
+    [0x3F, 0x18, 0x1C], // 33
+    [0x3F, 0x24, 0x24], // 34
+    [0x3F, 0x30, 0x30], // 35
     [0x3F, 0x3F, 0x3F], // 36
 ];
+
+#[inline(always)]
+fn fire_rgb(level: u8) -> (u8, u8, u8) {
+    let entry = FIRE_PAL[level.min((FIRE_LEVELS - 1) as u8) as usize];
+    (
+        ((entry[0] as u16 * 255) / 63) as u8,
+        ((entry[1] as u16 * 255) / 63) as u8,
+        ((entry[2] as u16 * 255) / 63) as u8,
+    )
+}
 
 // ─────────────────────────────────────────────────────────────
 // Буферы огня
@@ -583,6 +594,11 @@ pub fn fire_update() {
 
 /// Рендер огня во фреймбуфер VGA. Вызывается mod.rs после fire_update().
 pub fn fire_render() {
+    if crate::fb_buffer::is_initialized() {
+        fire_render_framebuffer();
+        return;
+    }
+
     unsafe {
         let top = SCREEN_H - FIRE_MAX_HEIGHT;
 
@@ -611,6 +627,47 @@ pub fn fire_render() {
                         FIRE_BUF[y * SCREEN_W + x],
                     );
                 }
+            }
+        }
+    }
+}
+
+fn fire_render_framebuffer() {
+    let fb_w = crate::fb_buffer::pixel_width();
+    let fb_h = crate::fb_buffer::pixel_height();
+    if fb_w == 0 || fb_h == 0 {
+        return;
+    }
+
+    let scale_x = (fb_w / SCREEN_W).max(1);
+    let scale_y = (fb_h / SCREEN_H).max(1);
+    let draw_w = SCREEN_W * scale_x;
+    let draw_h = SCREEN_H * scale_y;
+    let offset_x = fb_w.saturating_sub(draw_w) / 2;
+    let offset_y = fb_h.saturating_sub(draw_h) / 2;
+
+    unsafe {
+        for y in 0..SCREEN_H {
+            for x in 0..SCREEN_W {
+                let level = if y < SCREEN_H - FIRE_MAX_HEIGHT {
+                    0
+                } else if FPU_ENABLED {
+                    ((HEAT_BUF[y * SCREEN_W + x] * (FIRE_LEVELS as f32 - 1.0)) as usize)
+                        .min(FIRE_LEVELS - 1) as u8
+                } else {
+                    FIRE_BUF[y * SCREEN_W + x]
+                };
+
+                let (r, g, b) = fire_rgb(level);
+                crate::fb_buffer::fill_rect_rgb(
+                    offset_x + x * scale_x,
+                    offset_y + y * scale_y,
+                    scale_x,
+                    scale_y,
+                    r,
+                    g,
+                    b,
+                );
             }
         }
     }

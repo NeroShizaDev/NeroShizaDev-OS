@@ -216,6 +216,41 @@ fn nhs_desc_text(flags: u32) -> &'static str {
     }
 }
 
+fn builtin_desc_text(kind: AppKind) -> &'static str {
+    match (current_locale(), kind) {
+        (Locale::RuRu, AppKind::Games) => "Встроенный центр игр",
+        (Locale::RuRu, AppKind::Doom) => "Встроенный Doom",
+        (Locale::RuRu, AppKind::Tribe) => "Встроенное Племя",
+        (Locale::RuRu, _) => "Встроенное приложение",
+        (Locale::EnUs, AppKind::Games) => "Built-in games hub",
+        (Locale::EnUs, AppKind::Doom) => "Built-in Doom app",
+        (Locale::EnUs, AppKind::Tribe) => "Built-in Tribe app",
+        (Locale::EnUs, _) => "Built-in system app",
+        (Locale::ArEg, AppKind::Games) => "مركز ألعاب مدمج",
+        (Locale::ArEg, AppKind::Doom) => "تطبيق Doom مدمج",
+        (Locale::ArEg, AppKind::Tribe) => "تطبيق Tribe مدمج",
+        (Locale::ArEg, _) => "تطبيق مدمج",
+    }
+}
+
+fn builtin_tag_text(category: u8) -> &'static str {
+    match (current_locale(), category) {
+        (Locale::RuRu, crate::apps::installer::header::CAT_GAME) => "[ИГРА]",
+        (Locale::RuRu, crate::apps::installer::header::CAT_TOOL) => "[ИНСТР]",
+        (Locale::RuRu, crate::apps::installer::header::CAT_SCIENCE) => "[НАУКА]",
+        (Locale::RuRu, crate::apps::installer::header::CAT_SYSTEM) => "[СИСТ]",
+        (Locale::EnUs, crate::apps::installer::header::CAT_GAME) => "[GAME]",
+        (Locale::EnUs, crate::apps::installer::header::CAT_TOOL) => "[TOOL]",
+        (Locale::EnUs, crate::apps::installer::header::CAT_SCIENCE) => "[SCI]",
+        (Locale::EnUs, crate::apps::installer::header::CAT_SYSTEM) => "[SYS]",
+        (Locale::ArEg, crate::apps::installer::header::CAT_GAME) => "[لعبة]",
+        (Locale::ArEg, crate::apps::installer::header::CAT_TOOL) => "[أداة]",
+        (Locale::ArEg, crate::apps::installer::header::CAT_SCIENCE) => "[علم]",
+        (Locale::ArEg, crate::apps::installer::header::CAT_SYSTEM) => "[نظام]",
+        _ => "[APP]",
+    }
+}
+
 fn nhs_tag_text(flags: u32) -> &'static str {
     let has_script = flags & crate::apps::installer::header::FLAG_HAS_SCRIPT != 0;
     let has_native = flags & crate::apps::installer::header::FLAG_HAS_NATIVE != 0;
@@ -415,13 +450,7 @@ fn build_items(buf: &mut [LItem; MAX_ITEMS]) -> usize {
     }
 
     // NHS-секция — только если есть установленные пакеты
-    let mut has_nhs = false;
-    for slot in 0..crate::apps::installer::slots::MAX_SLOTS {
-        if crate::apps::installer::registry::get(slot).is_some() {
-            has_nhs = true;
-            break;
-        }
-    }
+    let has_nhs = crate::apps::installer::registry::user_installed_count() > 0;
     if has_nhs {
         if n < MAX_ITEMS {
             buf[n] = LItem {
@@ -432,7 +461,7 @@ fn build_items(buf: &mut [LItem; MAX_ITEMS]) -> usize {
             n += 1;
         }
         for slot in 0..crate::apps::installer::slots::MAX_SLOTS {
-            if crate::apps::installer::registry::get(slot).is_some() {
+            if crate::apps::installer::registry::get_user(slot).is_some() {
                 if n < MAX_ITEMS {
                     buf[n] = LItem {
                         kind: IKind::NhsA,
@@ -619,8 +648,16 @@ pub fn update(depth: usize) -> ActivityIntent {
                                 None => ActivityIntent::Pop,
                             },
                             IKind::NhsA => {
-                                LAUNCH_NHS_SLOT = item.index as u8;
-                                ActivityIntent::Push(AppKind::Nhs)
+                                if let Some(app) = crate::apps::installer::registry::get(item.index)
+                                {
+                                    let kind = app.launch_kind();
+                                    if kind == AppKind::Nhs {
+                                        LAUNCH_NHS_SLOT = item.index as u8;
+                                    }
+                                    ActivityIntent::Push(kind)
+                                } else {
+                                    ActivityIntent::Continue
+                                }
                             }
                             IKind::NhsH => ActivityIntent::Continue,
                         };
@@ -787,12 +824,20 @@ unsafe fn render_nhs_entry(row: usize, box_col: usize, slot: usize, is_sel: bool
 
         put(row, box_col + 13, SEP, if is_sel { HILIT } else { BORDER });
 
-        // Описание: тип пакета
-        let desc = nhs_desc_text(app.flags);
+        // Описание: тип пакета или встроенного app
+        let desc = if app.is_builtin() {
+            builtin_desc_text(app.launch_kind())
+        } else {
+            nhs_desc_text(app.flags)
+        };
         puts_utf8(row, box_col + 15, desc, fg);
 
         // Тег в правой части
-        let vtag = nhs_tag_text(app.flags);
+        let vtag = if app.is_builtin() {
+            builtin_tag_text(app.category)
+        } else {
+            nhs_tag_text(app.flags)
+        };
         let tc = box_col + BOX_W + 1 - utf8_cell_len(vtag) - 1;
         puts_utf8(row, tc, vtag, if is_sel { HILIT } else { TAG });
     } else {

@@ -9,7 +9,7 @@ set disassembly-flavor intel
 target remote localhost:1234
 
 # Загрузить отладочные символы ядра
-symbol-file target/x86_64-blog_os/debug/blog_os
+symbol-file target/x86_64-neroshiza_dev_os/debug/neroshiza_dev_os
 
 # Удобные breakpoints для старта
 # break kernel_main

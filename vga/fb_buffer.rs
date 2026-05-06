@@ -151,6 +151,8 @@ static mut SCROLLBACK_LEN: usize = 0;
 static FB_ADDR: AtomicUsize = AtomicUsize::new(0);
 static FB_STRIDE: AtomicUsize = AtomicUsize::new(0); // в пикселях
 static FB_BYTE_LEN: AtomicUsize = AtomicUsize::new(0);
+static FB_WIDTH: AtomicUsize = AtomicUsize::new(0);
+static FB_HEIGHT: AtomicUsize = AtomicUsize::new(0);
 static FB_COLS: AtomicUsize = AtomicUsize::new(0);
 static FB_ROWS: AtomicUsize = AtomicUsize::new(0);
 static FB_BPP: AtomicUsize = AtomicUsize::new(4); // байт на пиксель (3=BGR, 4=BGRx)
@@ -183,6 +185,8 @@ pub unsafe fn init(
     FB_ADDR.store(fb_addr, Ordering::Release);
     FB_STRIDE.store(stride, Ordering::Release);
     FB_BYTE_LEN.store(byte_len, Ordering::Release);
+    FB_WIDTH.store(width, Ordering::Release);
+    FB_HEIGHT.store(height, Ordering::Release);
     FB_COLS.store(cols, Ordering::Release);
     FB_ROWS.store(rows, Ordering::Release);
     FB_BPP.store(bpp, Ordering::Release);
@@ -216,6 +220,16 @@ pub fn get_cols() -> usize {
 #[inline]
 pub fn get_rows() -> usize {
     FB_ROWS.load(Ordering::Relaxed)
+}
+
+#[inline]
+pub fn pixel_width() -> usize {
+    FB_WIDTH.load(Ordering::Relaxed)
+}
+
+#[inline]
+pub fn pixel_height() -> usize {
+    FB_HEIGHT.load(Ordering::Relaxed)
 }
 
 #[inline]
@@ -399,6 +413,32 @@ pub fn write_codepoint_at(col: usize, row: usize, codepoint: u32, attr: u8) {
     unsafe {
         shadow_put_codepoint(row, col, codepoint, attr);
         draw_codepoint_at_raw(addr, fb_stride(), col, row, codepoint, attr);
+    }
+}
+
+pub fn fill_rect_rgb(x: usize, y: usize, width: usize, height: usize, r: u8, g: u8, b: u8) {
+    let addr = fb_addr();
+    if addr == 0 || width == 0 || height == 0 {
+        return;
+    }
+
+    let fb_width = pixel_width();
+    let fb_height = pixel_height();
+    if x >= fb_width || y >= fb_height {
+        return;
+    }
+
+    let x_end = x.saturating_add(width).min(fb_width);
+    let y_end = y.saturating_add(height).min(fb_height);
+    let stride = fb_stride();
+    let bpp = fb_bpp();
+
+    unsafe {
+        for py in y..y_end {
+            for px in x..x_end {
+                write_pixel(addr, stride, bpp, px, py, b, g, r);
+            }
+        }
     }
 }
 

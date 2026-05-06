@@ -5,22 +5,22 @@ chcp 65001 >nul 2>nul
 for %%I in ("%~dp0.") do set "PROJECT_ROOT=%%~fI"
 pushd "%PROJECT_ROOT%" >nul
 
-set "KERNEL=target\x86_64-blog_os\debug\blog_os"
-set "IMAGE=target\x86_64-blog_os\debug\blog_os-uefi.img"
+set "KERNEL=target\x86_64-neroshiza_dev_os\debug\neroshiza_dev_os"
+set "IMAGE=target\x86_64-neroshiza_dev_os\debug\neroshiza_dev_os-uefi.img"
 set "QEMU=C:\Program Files\qemu\qemu-system-x86_64.exe"
 set "IMAGE_BUILDER_MANIFEST=tools\image_builder\Cargo.toml"
 set "IMAGE_BUILDER_TARGET=tools\image_builder\target"
 set "HOST_CARGO_TARGET=x86_64-pc-windows-msvc"
 set "OVMF_CODE=tmp\qemu-fw\edk2-x86_64-code.fd"
 set "OVMF_VARS_TEMPLATE=tmp\qemu-fw\edk2-x86_64-vars.fd"
-set "OVMF_VARS=target\x86_64-blog_os\debug\ovmf-vars.fd"
+set "OVMF_VARS=target\x86_64-neroshiza_dev_os\debug\ovmf-vars.fd"
 set "SERIAL_LOG=qemu-serial.log"
 set "DEBUGCON_LOG=qemu-debugcon.log"
 set "ACTION="
 set "VBOX_VM=NeroShizaOS"
 set "VBOXMANAGE=C:\Program Files\Oracle\VirtualBox\VBoxManage.exe"
 set "VBOX_STORAGECTL=NVMe"
-set "VBOX_VDI=target\x86_64-blog_os\debug\blog_os-uefi.vdi"
+set "VBOX_VDI=target\x86_64-neroshiza_dev_os\debug\neroshiza_dev_os-uefi.vdi"
 
 for %%A in (%*) do (
     if /I "%%~A"=="qemu" set "ACTION=QEMU"
@@ -54,7 +54,7 @@ if errorlevel 1 (
     popd >nul
     exit /b 1
 )
-cargo build --bin blog_os
+cargo build --bin neroshiza_dev_os
 if errorlevel 1 (
     echo [!] Oshibka sborki yadra.
     pause
