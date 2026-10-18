@@ -592,6 +592,27 @@ pub fn show_shell_prompt() {
     redraw_input();
 }
 
+/// Асинхронный вывод поверх строки ввода (ответы LLM-моста из главного цикла):
+/// «> недонабранное» стирается, печатается `print`, затем приглашение
+/// и буфер рисуются заново — набранное не теряется.
+pub fn interject(print: impl FnOnce()) {
+    if !matches!(crate::ps2::input_owner(), crate::ps2::InputOwner::Shell) {
+        return;
+    }
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        exit_scroll_mode();
+        let row = crate::fb_buffer::current_row();
+        let left = crate::fb_buffer::default_text_left_col();
+        for col in left..left + crate::fb_buffer::default_text_cols() {
+            crate::fb_buffer::write_char_at(col, row, b' ', 0x0E);
+        }
+        crate::fb_buffer::reset_column();
+        print();
+        print!("> ");
+        redraw_input();
+    });
+}
+
 // ============================================================
 // ГЛАВНАЯ ЛОГИКА — Unicode Intent Engine
 // Ctrl+C/V/X/A, cursor-aware insert/delete, redraw_input
@@ -644,6 +665,10 @@ pub fn handle_keyboard_input(c: char) {
             if SHELL.confirm_pending {
                 SHELL.confirm_pending = false;
                 locale::render_event_auto(kernel_messages::KernelEvent::ShellCanceled);
+            } else if SHELL.buffer_len == 0 && crate::apps::voodoo::chat::is_active() {
+                // Esc на пустой строке закрывает сеанс с оракулом
+                locale::print_localized_line("", 0x0E);
+                crate::apps::voodoo::chat::stop();
             }
             reset_buffer();
             print!("> ");

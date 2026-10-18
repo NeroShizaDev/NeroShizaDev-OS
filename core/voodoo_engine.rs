@@ -1,11 +1,29 @@
+// ============================================================
+// VOODOO ENGINE — байесовская прослойка между нейросетью и диалогом
+// ============================================================
+// Нейро-слой (voodoo_nn) читает текст и отдаёт распределения:
+// «насколько это да», «про кого подсказка». Сам он ничего не решает.
+// Движок — единственное место, где копится уверенность:
+//
+//   ответ на вопрос  → answer_question(q, a∈[0,1])   (мягкий Байес)
+//   нейро-подсказка  → absorb_neural(L[persona], w)   (правдоподобие)
+//   неверная догадка → exclude(c)
+//        каждое свидетельство → латеральное торможение
+//                             → клеточный автомат (подмешивается как хаос)
+//                             → проверка энтропийного коллапса
+//
+// Диалог поверх движка — apps/voodoo/chat.rs.
+// ============================================================
+
 #![allow(dead_code)]
 
+use crate::kernel_messages::Locale;
 use core::arch::asm;
 
-const CHAR_COUNT: usize = 5;
-const Q_COUNT: usize = 5;
+pub const CHAR_COUNT: usize = 5;
+pub const Q_COUNT: usize = 7;
 
-const CHARACTERS: [&str; CHAR_COUNT] = [
+pub const CHARACTERS: [&str; CHAR_COUNT] = [
     "Петрович (Король жижи)",
     "Группа К.А.Ф.И.Д.Р.А.",
     "Банановый Турист",
@@ -13,14 +31,79 @@ const CHARACTERS: [&str; CHAR_COUNT] = [
     "Архитектор Хаоса",
 ];
 
+const CHARACTERS_EN: [&str; CHAR_COUNT] = [
+    "Petrovich (King of Goo)",
+    "K.A.F.I.D.R.A. Group",
+    "Banana Tourist",
+    "Dr. Bred",
+    "Architect of Chaos",
+];
+
 /// P(вопрос_j отвечает «да» | персонаж_i)
 const KNOWLEDGE_BASE: [[f32; Q_COUNT]; CHAR_COUNT] = [
-    [0.1, 1.0, 0.0, 0.0, 0.0],
-    [1.0, 0.5, 0.0, 0.0, 0.0],
-    [0.0, 0.0, 0.0, 0.0, 1.0],
-    [0.8, 0.2, 1.0, 0.0, 0.0],
-    [0.9, 0.8, 0.0, 1.0, 0.0],
+    [0.1, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+    [1.0, 0.5, 0.0, 0.0, 0.0, 1.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+    [0.8, 0.2, 1.0, 0.0, 0.0, 0.0, 0.0],
+    [0.9, 0.8, 0.0, 1.0, 0.0, 0.0, 0.0],
 ];
+
+const QUESTIONS_RU: [&str; Q_COUNT] = [
+    "Он учёный или исследователь?",
+    "Он у власти - правит, командует?",
+    "Он выписывает рецепты?",
+    "Он строит миры из кода?",
+    "Он путешествует в поисках истины?",
+    "Это целая группа, а не один персонаж?",
+    "Он связан с жижей?",
+];
+
+const QUESTIONS_EN: [&str; Q_COUNT] = [
+    "Is it a scientist or a researcher?",
+    "Does it hold power - rule, command?",
+    "Does it write prescriptions?",
+    "Does it build worlds out of code?",
+    "Does it travel in search of truth?",
+    "Is it a whole group, not one character?",
+    "Is it connected to goo?",
+];
+
+const QUESTIONS_AR: [&str; Q_COUNT] = [
+    "هل هو عالم او باحث?",
+    "هل يملك السلطة ويحكم?",
+    "هل يكتب الوصفات الطبية?",
+    "هل يبني عوالم من الكود?",
+    "هل يسافر بحثا عن الحقيقة?",
+    "هل هي مجموعة كاملة وليست شخصية واحدة?",
+    "هل له علاقة بالسائل اللزج?",
+];
+
+/// Вероятность, что человек ответил наоборот (опечатка, не понял вопрос).
+/// Без неё один неверный ответ навсегда обнуляет правильного персонажа.
+const ANSWER_NOISE: f32 = 0.05;
+
+/// Насколько движок верит persona-голове нейросети. Остаток — равномерное
+/// распределение: сеть свидетель, а не судья. Без этого одна фраза при
+/// латеральном торможении (p²) сразу даёт «уверенность 100%».
+const NEURAL_TRUST: f32 = 0.5;
+
+/// С какой уверенностью лидера движок готов назвать имя.
+pub const GUESS_THRESHOLD: f32 = 0.80;
+
+pub fn character_name(idx: usize) -> &'static str {
+    match crate::locale::get_locale() {
+        Locale::RuRu => CHARACTERS[idx],
+        Locale::EnUs | Locale::ArEg => CHARACTERS_EN[idx],
+    }
+}
+
+pub fn question_text(q: usize) -> &'static str {
+    match crate::locale::get_locale() {
+        Locale::RuRu => QUESTIONS_RU[q],
+        Locale::EnUs => QUESTIONS_EN[q],
+        Locale::ArEg => QUESTIONS_AR[q],
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum AutomatonMode {
@@ -37,12 +120,40 @@ impl AutomatonMode {
     fn is_deterministic(self) -> bool {
         matches!(self, AutomatonMode::Rule90)
     }
+
+    /// Доля автомата, подмешиваемая к байесовскому апостериори.
+    /// 1.0 = автомат полностью переписывает вероятности (как в демо).
+    #[inline]
+    fn chaos_blend(self) -> f32 {
+        match self {
+            AutomatonMode::ConwayB3S23 | AutomatonMode::HighLife => 0.15,
+            AutomatonMode::Seeds => 0.20,
+            AutomatonMode::Rule90 => 0.10,
+            AutomatonMode::Diffusion => 0.25,
+            AutomatonMode::QuantumChaos => 0.35,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            AutomatonMode::ConwayB3S23 => "Conway",
+            AutomatonMode::HighLife => "HighLife",
+            AutomatonMode::Seeds => "Seeds",
+            AutomatonMode::Rule90 => "Rule90",
+            AutomatonMode::Diffusion => "Diffusion",
+            AutomatonMode::QuantumChaos => "QuantumChaos",
+        }
+    }
 }
 
 pub struct VoodooEngine {
     pub probabilities: [f32; CHAR_COUNT],
     pub asked_questions: [bool; Q_COUNT],
+    /// Вычеркнутые после неверной догадки — до конца раунда
+    pub excluded: [bool; CHAR_COUNT],
     pub connection_drops: u32,
+    /// Сколько нейро-подсказок впитано в этом раунде
+    pub neural_evidence: u32,
     question_loop_counter: u32,
     answer_count: u32,
     pub cellular_mode: AutomatonMode,
@@ -54,11 +165,102 @@ impl VoodooEngine {
         Self {
             probabilities: [init_prob; CHAR_COUNT],
             asked_questions: [false; Q_COUNT],
+            excluded: [false; CHAR_COUNT],
             connection_drops: 0,
+            neural_evidence: 0,
             question_loop_counter: 0,
             answer_count: 0,
             cellular_mode: AutomatonMode::ConwayB3S23,
         }
+    }
+
+    /// Новый раунд: равномерное распределение, все вопросы снова доступны.
+    pub fn reset(&mut self) {
+        self.reset_matrix();
+    }
+
+    pub fn questions_asked(&self) -> usize {
+        self.asked_questions.iter().filter(|&&q| q).count()
+    }
+
+    pub fn candidates_left(&self) -> usize {
+        self.excluded.iter().filter(|&&x| !x).count()
+    }
+
+    /// Самый вероятный из невычеркнутых.
+    pub fn leader(&self) -> (usize, f32) {
+        let mut best_idx = 0;
+        let mut best_val = -1.0f32;
+        for (i, &p) in self.probabilities.iter().enumerate() {
+            if !self.excluded[i] && p > best_val {
+                best_val = p;
+                best_idx = i;
+            }
+        }
+        (best_idx, best_val.max(0.0))
+    }
+
+    /// Пора называть имя: лидер уверен, вопросы кончились или выбора нет.
+    pub fn should_guess(&self) -> bool {
+        let (_, p) = self.leader();
+        p >= GUESS_THRESHOLD
+            || self.candidates_left() <= 1
+            || self.asked_questions.iter().all(|&q| q)
+    }
+
+    /// Нейро-подсказка как функция правдоподобия.
+    ///
+    /// `likelihood` — softmax persona-головы (сумма 1), `weight` ∈ [0,1] —
+    /// насколько сеть уверена, что это вообще подсказка. L смягчается
+    /// к равномерному (NEURAL_TRUST), затем смесь (1-w) + w·N·L не даёт
+    /// одной фразе обнулить персонажа: при w=0 свидетельство нейтрально.
+    pub fn absorb_neural(&mut self, likelihood: &[f32; CHAR_COUNT], weight: f32) -> bool {
+        let w = clamp_f32(weight, 0.0, 1.0);
+        let n = CHAR_COUNT as f32;
+        let mut sum = 0.0f32;
+        for c in 0..CHAR_COUNT {
+            if self.excluded[c] {
+                self.probabilities[c] = 0.0;
+                continue;
+            }
+            let l = NEURAL_TRUST * clamp_f32(likelihood[c], 0.0, 1.0) + (1.0 - NEURAL_TRUST) / n;
+            self.probabilities[c] *= (1.0 - w) + w * n * l;
+            sum += self.probabilities[c];
+        }
+        if sum <= 1e-6 {
+            self.reset_matrix();
+            return false;
+        }
+        for p in &mut self.probabilities {
+            *p /= sum;
+        }
+        self.neural_evidence += 1;
+        self.integrate();
+        !self.detect_entropy_collapse()
+    }
+
+    /// Свидетельство над слотами без игровой семантики — так движок работает
+    /// интерпретатором выхода LLM (apps/voodoo/interp.rs): слоты = версии
+    /// реплики. `allowed[k] == false` — слот вне игры на этот шаг (бред).
+    /// Дальше тот же хвост, что у вопросов и подсказок: торможение → автомат.
+    pub fn absorb_evidence(&mut self, evidence: &[f32; CHAR_COUNT], allowed: &[bool; CHAR_COUNT]) {
+        for c in 0..CHAR_COUNT {
+            self.excluded[c] = !allowed[c];
+            self.probabilities[c] *= clamp_f32(evidence[c], 0.0, 1.0);
+        }
+        self.normalize_probabilities();
+        self.integrate();
+    }
+
+    /// Неверная догадка: персонаж вычёркивается до конца раунда.
+    /// false — вычеркнуть больше некого.
+    pub fn exclude(&mut self, idx: usize) -> bool {
+        if idx >= CHAR_COUNT {
+            return self.candidates_left() > 0;
+        }
+        self.excluded[idx] = true;
+        self.normalize_probabilities();
+        self.candidates_left() > 0
     }
 
     pub fn set_cellular_mode(&mut self, mode: AutomatonMode) {
@@ -125,14 +327,23 @@ impl VoodooEngine {
             return false;
         }
 
+        if q_index >= Q_COUNT {
+            return false;
+        }
         let user_answer = clamp_f32(user_answer, 0.0, 1.0);
 
         self.asked_questions[q_index] = true;
 
         let mut sum = 0.0f32;
         for c in 0..CHAR_COUNT {
+            if self.excluded[c] {
+                self.probabilities[c] = 0.0;
+                continue;
+            }
             let db = KNOWLEDGE_BASE[c][q_index];
-            let factor = (1.0 - unsafe { fpu_abs(db - user_answer) }).max(0.0);
+            let agreement = (1.0 - unsafe { fpu_abs(db - user_answer) }).max(0.0);
+            // Модель шума: с вероятностью ANSWER_NOISE человек ошибся
+            let factor = ANSWER_NOISE + (1.0 - 2.0 * ANSWER_NOISE) * agreement;
             self.probabilities[c] *= factor;
             sum += self.probabilities[c];
         }
@@ -146,9 +357,7 @@ impl VoodooEngine {
             return false;
         }
 
-        self.apply_lateral_inhibition();
-        self.apply_cellular_tick();
-        self.normalize_probabilities();
+        self.integrate();
 
         if self.detect_entropy_collapse() {
             return false;
@@ -158,15 +367,8 @@ impl VoodooEngine {
     }
 
     pub fn guess(&self) -> (&'static str, f32) {
-        let mut best_idx = 0;
-        let mut best_val = 0.0f32;
-        for (i, &p) in self.probabilities.iter().enumerate() {
-            if p > best_val {
-                best_val = p;
-                best_idx = i;
-            }
-        }
-        (CHARACTERS[best_idx], best_val)
+        let (idx, p) = self.leader();
+        (CHARACTERS[idx], p)
     }
 
     pub fn chaos_measure(&self) -> f32 {
@@ -177,6 +379,19 @@ impl VoodooEngine {
             }
         }
         1.0 - max_p
+    }
+
+    /// Общий хвост любого свидетельства: торможение → автомат как
+    /// примесь хаоса → маска вычеркнутых → нормализация.
+    fn integrate(&mut self) {
+        self.apply_lateral_inhibition();
+        let bayes = self.probabilities;
+        self.apply_cellular_tick();
+        let a = self.cellular_mode.chaos_blend();
+        for i in 0..CHAR_COUNT {
+            self.probabilities[i] = (1.0 - a) * bayes[i] + a * self.probabilities[i];
+        }
+        self.normalize_probabilities();
     }
 
     fn apply_lateral_inhibition(&mut self) {
@@ -267,7 +482,11 @@ impl VoodooEngine {
     fn normalize_probabilities(&mut self) {
         const EPS: f32 = 1e-9;
         let mut sum = 0.0f32;
-        for p in &mut self.probabilities {
+        for (i, p) in self.probabilities.iter_mut().enumerate() {
+            if self.excluded[i] {
+                *p = 0.0;
+                continue;
+            }
             if *p < EPS {
                 *p = EPS;
             }
@@ -278,9 +497,10 @@ impl VoodooEngine {
                 *p /= sum;
             }
         } else {
-            let init = 1.0 / (CHAR_COUNT as f32);
-            for p in &mut self.probabilities {
-                *p = init;
+            let left = self.candidates_left().max(1);
+            let init = 1.0 / (left as f32);
+            for (i, p) in self.probabilities.iter_mut().enumerate() {
+                *p = if self.excluded[i] { 0.0 } else { init };
             }
         }
     }
@@ -318,6 +538,8 @@ impl VoodooEngine {
         for q in &mut self.asked_questions {
             *q = false;
         }
+        self.excluded = [false; CHAR_COUNT];
+        self.neural_evidence = 0;
         self.question_loop_counter = 0;
         self.answer_count = 0;
     }

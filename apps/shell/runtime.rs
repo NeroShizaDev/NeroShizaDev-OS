@@ -135,6 +135,8 @@ fn emit_shell_serial_monitor() {
 pub fn process_deferred_actions() {
     crate::ps2::flush_debug_serial(64);
     emit_shell_serial_monitor();
+    // Ответы LLM-моста оракула (COM1), только пока идёт сеанс
+    crate::apps::voodoo::bridge::poll();
 
     if crate::irq_guard::take_first_hit_alert() {
         show_irq_guard_first_hit_alert();

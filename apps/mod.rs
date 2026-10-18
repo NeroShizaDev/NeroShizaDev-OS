@@ -16,6 +16,7 @@ pub mod jackal;
 pub mod kernel_hooks;
 pub mod launcher;
 pub mod locale_switcher;
+pub mod voodoo;
 
 // Moved from moduls/
 pub mod chronos;
