@@ -8,7 +8,8 @@
 //         от холодной (точно, скучно) к горячей (живо, рискованно),
 //         у каждой три оценки:
 //           смысл    — LLM-судья: «реплика по делу, без бреда?»
-//           гладкость — средняя вероятность токенов
+//           гладкость — средняя вероятность токенов (только телеметрия,
+//                       см. FLUENCY_WEIGHT)
 //           новизна  — непохожесть на уже сказанное и на шаблоны промпта
 //   ядро: бред (смысл < SENSE_MIN) и повтор (новизна < NOVELTY_MIN)
 //                                            → маска, как вычеркнутый персонаж
@@ -36,6 +37,13 @@ const NOVELTY_MIN: f32 = 0.2;
 const MOOD_MEMORY: f32 = 0.5;
 /// Одна и та же температура столько раз подряд — смена правила автомата.
 const STALL: u32 = 3;
+/// Вес гладкости в свидетельстве. Был 0.5, но замер voodoo-proxy (bench.py,
+/// 16 запросов × 3 прогона, YandexGPT-5-Lite-8B) показал: гладкость — это
+/// просто «температура наоборот» (у холодных версий она всегда выше), а
+/// торможение p² удваивает фору. Интерпретатор уплывал в t=0.35 (54% выборов)
+/// и был менее разнообразным, чем обычная генерация. С нулём выбор ровный
+/// по всем температурам, разнообразие выше, качество по судье то же.
+const FLUENCY_WEIGHT: f32 = 0.0;
 
 const MODES: [AutomatonMode; 6] = [
     AutomatonMode::ConwayB3S23,
@@ -97,8 +105,8 @@ pub fn decide(cands: &[Option<Candidate>; SLOTS]) -> Option<Verdict> {
         return None;
     }
 
-    // Свидетельство: смысл — главный множитель, гладкость и новизна —
-    // мягкие (линейные смеси вместо степеней: в no_std нет powf).
+    // Свидетельство: смысл — главный множитель, новизна (и гладкость с весом
+    // FLUENCY_WEIGHT) — мягкие (линейные смеси вместо степеней: в no_std нет powf).
     let mut evidence = [0.0f32; SLOTS];
     let mut allowed = [false; SLOTS];
     let mut best_sense = (0usize, -1.0f32);
@@ -106,7 +114,8 @@ pub fn decide(cands: &[Option<Candidate>; SLOTS]) -> Option<Verdict> {
         let Some(c) = c else {
             continue;
         };
-        evidence[k] = c.sense * (0.5 + 0.5 * c.fluency) * (0.25 + 0.75 * c.novelty);
+        let fluency = (1.0 - FLUENCY_WEIGHT) + FLUENCY_WEIGHT * c.fluency;
+        evidence[k] = c.sense * fluency * (0.25 + 0.75 * c.novelty);
         allowed[k] = c.sense >= SENSE_MIN && c.novelty >= NOVELTY_MIN;
         if c.sense > best_sense.1 {
             best_sense = (k, c.sense);

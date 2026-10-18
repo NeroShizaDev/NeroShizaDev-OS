@@ -717,9 +717,10 @@ def dry_run(it: Interpreter) -> None:
         for line in lines:
             parts = line.split(" ", 7)
             if parts[0] == "CAND":
-                k, sense, flu, nov = int(parts[2]), *(int(x) / 1000 for x in parts[4:7])
+                k, sense, _flu, nov = int(parts[2]), *(int(x) / 1000 for x in parts[4:7])
                 ok = sense >= 0.35 and nov >= 0.2
-                ev = sense * (0.5 + 0.5 * flu) * (0.25 + 0.75 * nov) if ok else 0.0
+                # Гладкость не учитываем — как FLUENCY_WEIGHT = 0 в interp.rs
+                ev = sense * (0.25 + 0.75 * nov) if ok else 0.0
                 if ev > score:
                     best, score = k, ev
             print("   ", line.replace(ID, "1"))
