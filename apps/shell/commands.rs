@@ -1069,9 +1069,9 @@ const BUILTIN_COMMANDS: &[BuiltinCommand] = &[
         name: "voodoo",
         aliases: &["oracle"],
         category: "ibip",
-        summary: "run the Bayesian oracle demo",
-        usage: "voodoo",
-        handler: handle_shell_intent_command,
+        summary: "chat with the neural Bayesian oracle",
+        usage: "voodoo [demo | nn <text> | test | model | bridge | interp]",
+        handler: handle_voodoo_shell_command,
     },
     BuiltinCommand {
         name: "irqdbg",
@@ -1225,7 +1225,7 @@ fn print_shell_help_overview() {
             locale::print_localized_line("  whoami / manifest     - شخصية / مانيفست", 0x0E);
             locale::print_localized_line("  entropy / shannon     - انتروبيا شانون", 0x0E);
             locale::print_localized_line("  rng / rand            - رقم عشوائي", 0x0E);
-            locale::print_localized_line("  voodoo / oracle       - الحاسوب الباييزي", 0x0E);
+            locale::print_localized_line("  voodoo / oracle       - العراف العصبي (دردشة)", 0x0E);
             locale::print_localized_line("التنقل:", 0x0B);
             locale::print_localized_line("  ←/→       - تحريك المؤشر", 0x0E);
             locale::print_localized_line("  ↑/↓       - تاريخ الأوامر", 0x0E);
@@ -1306,7 +1306,7 @@ fn print_shell_help_overview() {
                 0x0E,
             );
             locale::print_localized_line("  rng / rand             - RDRAND + d6 roll", 0x0E);
-            locale::print_localized_line("  voodoo / oracle        - Bayesian oracle", 0x0E);
+            locale::print_localized_line("  voodoo / oracle        - Neural oracle chat", 0x0E);
             locale::print_localized_line("Navigation:", 0x0B);
             locale::print_localized_line("  Left/Right  - Cursor move", 0x0E);
             locale::print_localized_line("  Up/Down     - Command history", 0x0E);
@@ -1382,7 +1382,7 @@ fn print_shell_help_overview() {
             locale::print_localized_line("  manifest/нейро/шиза   - Манифест NERO & SHIZA", 0x0E);
             locale::print_localized_line("  entropy/шеннон         - Энтропия Шеннона ввода", 0x0E);
             locale::print_localized_line("  rng/рандом/кубик       - RDRAND + кубик d6", 0x0E);
-            locale::print_localized_line("  voodoo/акинатор        - Байесовский оракул", 0x0E);
+            locale::print_localized_line("  voodoo/вуду/акинатор   - Нейро-оракул (чат)", 0x0E);
             locale::print_localized_line("Навигация:", 0x0B);
             locale::print_localized_line("  ←/→       - Курсор по строке", 0x0E);
             locale::print_localized_line("  ↑/↓       - История команд", 0x0E);
@@ -1737,7 +1737,7 @@ fn handle_shell_intent_command() -> bool {
         }
         ShellIntent::Voodoo => {
             state::bump_shell_command_total();
-            voodoo_engine::demo_cellular_automaton();
+            apps::voodoo::chat::start();
         }
         ShellIntent::Unknown => {
             state::bump_shell_command_stat(8);
@@ -2289,9 +2289,82 @@ fn handle_nhs_shell_command() -> bool {
     }
 }
 
-pub(super) fn handle_shell_commands() -> bool {
-    let Some((command, len)) = shell_command_line() else {
+/// Первое слово строки (в нижнем регистре) и остаток после него — в codepoints,
+/// чтобы кириллица («вуду нн привет») доходила до разбора без потерь.
+fn split_first_word(line: &[u32]) -> (&[u32], &[u32]) {
+    let is_space = |cp: &u32| *cp == 0x20 || *cp == 0x09;
+    let start = line
+        .iter()
+        .position(|cp| !is_space(cp))
+        .unwrap_or(line.len());
+    let rest = &line[start..];
+    let end = rest.iter().position(is_space).unwrap_or(rest.len());
+    let tail = &rest[end..];
+    let tail_start = tail
+        .iter()
+        .position(|cp| !is_space(cp))
+        .unwrap_or(tail.len());
+    (&rest[..end], &tail[tail_start..])
+}
+
+fn word_is(word: &[u32], options: &[&str]) -> bool {
+    options.iter().any(|opt| {
+        let mut chars = opt.chars();
+        word.iter().all(|&cp| {
+            let cp = crate::voodoo_nn::normalize_cp(cp);
+            chars.next().map(|c| c as u32) == Some(cp)
+        }) && chars.next().is_none()
+    })
+}
+
+/// voodoo [demo | nn <фраза> | test | model | bridge | interp] — нейро-оракул и его потроха.
+fn handle_voodoo_shell_command() -> bool {
+    let (line, len) = shell_codepoint_line();
+    let (cmd, args) = split_first_word(&line[..len]);
+    if !word_is(cmd, &["voodoo", "oracle", "вуду", "оракул", "акинатор"]) {
         return false;
+    }
+    state::bump_shell_command_total();
+
+    let (sub, rest) = split_first_word(args);
+    if sub.is_empty() {
+        apps::voodoo::chat::start();
+    } else if word_is(sub, &["demo", "демо", "automaton", "автомат"]) {
+        voodoo_engine::demo_cellular_automaton();
+    } else if word_is(sub, &["nn", "нн", "probe", "нейро"]) {
+        apps::voodoo::chat::probe(rest);
+    } else if word_is(sub, &["test", "тест", "selftest"]) {
+        apps::voodoo::chat::selftest();
+    } else if word_is(sub, &["model", "модель", "info"]) {
+        apps::voodoo::chat::print_model_info();
+    } else if word_is(sub, &["bridge", "мост", "link", "llm"]) {
+        apps::voodoo::bridge::print_status();
+    } else if word_is(sub, &["interp", "интерп", "mood", "настроение"]) {
+        apps::voodoo::interp::print_state();
+    } else {
+        locale::print_localized_line(
+            "[VOODOO] usage: voodoo [demo | nn <text> | test | model | bridge | interp]",
+            0x0E,
+        );
+    }
+    true
+}
+
+pub(super) fn handle_shell_commands() -> bool {
+    // Пока идёт сеанс с оракулом, вся строка — реплика в диалоге
+    if apps::voodoo::chat::is_active() {
+        let (line, len) = shell_codepoint_line();
+        apps::voodoo::chat::on_line(&line[..len]);
+        return true;
+    }
+    if handle_voodoo_shell_command() {
+        return true;
+    }
+
+    let Some((command, len)) = shell_command_line() else {
+        // Не-ASCII (кириллица/арабский): алиасы вида «выход», «помощь»
+        // и разбор неизвестного символа живут в intent-обработчике
+        return handle_shell_intent_command();
     };
     let Some(line) = shell_command_str(&command, len) else {
         return false;

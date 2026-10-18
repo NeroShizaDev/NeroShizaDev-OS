@@ -108,7 +108,9 @@ pub mod kernel_messages;
 // ================================================================
 // ФАЗА 7: Пространство пользователя и Приложения
 // ================================================================
+pub mod gguf;
 pub mod voodoo_engine;
+pub mod voodoo_nn;
 pub use crate::voodoo_engine::demo_cellular_automaton;
 
 use core::panic::PanicInfo;

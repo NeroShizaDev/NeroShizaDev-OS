@@ -6,7 +6,7 @@ mod state;
 mod input;
 
 pub use commands::{shell_dictionary_bytes, shell_dictionary_size};
-pub use input::{handle_keyboard_input, handle_raw_key, show_shell_prompt};
+pub use input::{handle_keyboard_input, handle_raw_key, interject, show_shell_prompt};
 pub use runtime::process_deferred_actions;
 pub(crate) use runtime::{defer_shell_apps, defer_shell_reboot, defer_shell_shutdown};
 pub use state::{
